@@ -173,6 +173,12 @@ export const cliOptions = {
     describe: 'Whether to enable interoperability tools',
     hidden: true,
   },
+  stealth: {
+    type: 'boolean',
+    default: true,
+    describe:
+      'Stealth mode reduces automation detection signals (hides WebDriver, removes automation flags). Enabled by default. Use --no-stealth to disable.',
+  },
   chromeArg: {
     type: 'array',
     describe:
@@ -306,6 +312,10 @@ export function parseArguments(version: string, argv = process.argv) {
       [
         '$0 --no-performance-crux',
         'Disable CrUX (field data) integration in performance tools.',
+      ],
+      [
+        '$0 --no-stealth',
+        'Disable stealth mode (keeps default automation detection signals).',
       ],
     ]);
 

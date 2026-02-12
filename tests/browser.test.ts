@@ -73,6 +73,25 @@ describe('browser', () => {
       await browser.close();
     }
   });
+  it('launches with stealth mode', async () => {
+    const browser = await launch({
+      headless: true,
+      isolated: true,
+      executablePath: executablePath(),
+      devtools: false,
+      stealth: true,
+    });
+    try {
+      const [page] = await browser.pages();
+      // Navigate to a blank page so the stealth init script executes.
+      await page.goto('about:blank');
+      const webdriver = await page.evaluate(() => navigator.webdriver);
+      assert.strictEqual(webdriver, undefined);
+    } finally {
+      await browser.close();
+    }
+  });
+
   it('connects to an existing browser with userDataDir', async () => {
     const tmpDir = os.tmpdir();
     const folderPath = path.join(tmpDir, `temp-folder-${crypto.randomUUID()}`);

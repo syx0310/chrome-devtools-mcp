@@ -16,6 +16,7 @@ import {
 } from './DevtoolsUtils.js';
 import type {ListenerMap, UncaughtError} from './PageCollector.js';
 import {NetworkCollector, ConsoleCollector} from './PageCollector.js';
+import {applyStealthToPage} from './stealth.js';
 import {Locator} from './third_party/index.js';
 import type {DevTools} from './third_party/index.js';
 import type {
@@ -71,6 +72,8 @@ interface McpContextOptions {
   experimentalIncludeAllPages?: boolean;
   // Whether CrUX data should be fetched.
   performanceCrux: boolean;
+  // Whether stealth mode is enabled — hides automation signals on new pages.
+  stealth?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 5_000;
@@ -264,6 +267,9 @@ export class McpContext implements Context {
 
   async newPage(background?: boolean): Promise<Page> {
     const page = await this.browser.newPage({background});
+    if (this.#options.stealth) {
+      await applyStealthToPage(page);
+    }
     await this.createPagesSnapshot();
     this.selectPage(page);
     this.#networkCollector.addPage(page);

@@ -109,6 +109,7 @@ async function getContext(): Promise<McpContext> {
           acceptInsecureCerts: args.acceptInsecureCerts,
           devtools,
           enableExtensions: args.categoryExtensions,
+          stealth: args.stealth,
         });
 
   if (context?.browser !== browser) {
@@ -116,6 +117,7 @@ async function getContext(): Promise<McpContext> {
       experimentalDevToolsDebugging: devtools,
       experimentalIncludeAllPages: args.experimentalIncludeAllPages,
       performanceCrux: args.performanceCrux,
+      stealth: args.stealth,
     });
   }
   return context;

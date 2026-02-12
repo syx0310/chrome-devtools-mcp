@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {logger} from './logger.js';
+import {applyStealthToBrowser} from './stealth.js';
 import type {
   Browser,
   ChromeReleaseChannel,
@@ -146,6 +147,7 @@ interface McpLaunchOptions {
   ignoreDefaultChromeArgs?: string[];
   devtools: boolean;
   enableExtensions?: boolean;
+  stealth?: boolean;
 }
 
 export async function launch(options: McpLaunchOptions): Promise<Browser> {
@@ -172,8 +174,21 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
     ...(options.chromeArgs ?? []),
     '--hide-crash-restore-bubble',
   ];
-  const ignoreDefaultArgs: LaunchOptions['ignoreDefaultArgs'] =
+  let ignoreDefaultArgs: LaunchOptions['ignoreDefaultArgs'] =
     options.ignoreDefaultChromeArgs ?? false;
+
+  if (options.stealth) {
+    args.push('--disable-blink-features=AutomationControlled');
+    args.push('--disable-infobars');
+    // Suppress --enable-automation so Chrome does not expose automation signals.
+    const extraIgnored = ['--enable-automation'];
+    if (Array.isArray(ignoreDefaultArgs)) {
+      ignoreDefaultArgs = [...ignoreDefaultArgs, ...extraIgnored];
+    } else if (ignoreDefaultArgs === false) {
+      ignoreDefaultArgs = extraIgnored;
+    }
+    // ignoreDefaultArgs === true already ignores everything, no change needed
+  }
 
   if (headless) {
     args.push('--screen-info={3840x2160}');
@@ -216,6 +231,9 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
         contentWidth: options.viewport.width,
         contentHeight: options.viewport.height,
       });
+    }
+    if (options.stealth) {
+      await applyStealthToBrowser(browser);
     }
     return browser;
   } catch (error) {

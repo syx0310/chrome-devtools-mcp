@@ -25,6 +25,7 @@ describe('cli args parsing', () => {
     performanceCrux: true,
     'usage-statistics': true,
     usageStatistics: true,
+    stealth: true,
   };
 
   it('parses with default args', async () => {
@@ -293,5 +294,15 @@ describe('cli args parsing', () => {
       '--no-performance-crux',
     ]);
     assert.strictEqual(disabledArgs.performanceCrux, false);
+  });
+
+  it('stealth is enabled by default', async () => {
+    const args = parseArguments('1.0.0', ['node', 'main.js']);
+    assert.strictEqual(args.stealth, true);
+  });
+
+  it('parses --no-stealth to disable', async () => {
+    const args = parseArguments('1.0.0', ['node', 'main.js', '--no-stealth']);
+    assert.strictEqual(args.stealth, false);
   });
 });
