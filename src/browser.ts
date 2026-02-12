@@ -180,6 +180,11 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
   if (options.stealth) {
     args.push('--disable-blink-features=AutomationControlled');
     args.push('--disable-infobars');
+    args.push('--disable-component-update');
+    args.push('--disable-features=DialMediaRouteProvider');
+    args.push('--disable-default-apps');
+    args.push('--no-first-run');
+    args.push('--password-store=basic');
     // Suppress --enable-automation so Chrome does not expose automation signals.
     const extraIgnored = ['--enable-automation'];
     if (Array.isArray(ignoreDefaultArgs)) {

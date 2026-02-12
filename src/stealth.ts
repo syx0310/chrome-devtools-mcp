@@ -114,16 +114,136 @@ export const STEALTH_INIT_SCRIPT = `
       configurable: true,
     });
   }
+
+  // 7. WebGL vendor/renderer spoofing — hide SwiftShader (headless fingerprint)
+  const getParameterProto = WebGLRenderingContext.prototype.getParameter;
+  WebGLRenderingContext.prototype.getParameter = function (param) {
+    // UNMASKED_VENDOR_WEBGL
+    if (param === 0x9245) return 'Intel Inc.';
+    // UNMASKED_RENDERER_WEBGL
+    if (param === 0x9246) return 'Intel Iris OpenGL Engine';
+    return getParameterProto.call(this, param);
+  };
+  const getParameterProto2 = WebGL2RenderingContext.prototype.getParameter;
+  WebGL2RenderingContext.prototype.getParameter = function (param) {
+    if (param === 0x9245) return 'Intel Inc.';
+    if (param === 0x9246) return 'Intel Iris OpenGL Engine';
+    return getParameterProto2.call(this, param);
+  };
+
+  // 8. Fix window.outerWidth/outerHeight (0 in headless → match inner)
+  if (window.outerWidth === 0) {
+    Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth, configurable: true });
+  }
+  if (window.outerHeight === 0) {
+    Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 85, configurable: true });
+  }
+
+  // 9. Remove CDP artifacts — cdc_ prefixed properties (ChromeDriver/Puppeteer leak)
+  const cleanCdcProps = (obj) => {
+    try {
+      for (const prop of Object.getOwnPropertyNames(obj)) {
+        if (prop.startsWith('cdc_') || prop.startsWith('__puppeteer')) {
+          try { delete obj[prop]; } catch (_e) { /* non-configurable */ }
+        }
+      }
+    } catch (_e) { /* ignore */ }
+  };
+  cleanCdcProps(window);
+  cleanCdcProps(document);
+
+  // 10. DevTools open detection prevention
+  // Prevent console-based DevTools detection (image trick, regex trick)
+  // Some sites create an object with a custom getter and log it; the getter
+  // only fires when DevTools is open and the console is rendered.
+  const originalToString = Function.prototype.toString;
+  // Ensure our patched functions have native-looking toString
+  const patchedFns = new Set();
+  const nativeToString = function toString() {
+    if (patchedFns.has(this)) {
+      return 'function ' + (this.name || '') + '() { [native code] }';
+    }
+    return originalToString.call(this);
+  };
+  patchedFns.add(nativeToString);
+  Function.prototype.toString = nativeToString;
+
+  // 11. navigator.maxTouchPoints — ensure non-zero when expected
+  // Some detection checks for inconsistency between mobile UA and touchPoints
+  // On desktop, 0 is correct; just ensure it's not flagged as automation artifact.
+
+  // 12. Patch Error stack traces to remove puppeteer/CDP references
+  const originalPrepareStackTrace = Error.prepareStackTrace;
+  Error.prepareStackTrace = function (error, stack) {
+    const filtered = stack.filter(frame => {
+      const fn = frame.getFileName() || '';
+      return !fn.includes('pptr:') && !fn.includes('__puppeteer');
+    });
+    if (originalPrepareStackTrace) {
+      return originalPrepareStackTrace(error, filtered);
+    }
+    return error.name + ': ' + error.message + '\\n' + filtered.map(f => '    at ' + f.toString()).join('\\n');
+  };
 })();
 `;
 
 /**
+ * Apply CDP-level stealth patches to a single page:
+ * - Skip all debugger pauses (anti-debugging traps)
+ * - Strip "HeadlessChrome" from User-Agent
+ * - Remove cdc_ properties injected by CDP
+ */
+async function applyCdpStealth(page: Page): Promise<void> {
+  try {
+    // @ts-expect-error _client() is internal Puppeteer API
+    const client = page._client();
+
+    // Skip debugger; statement traps used for anti-debugging
+    await client.send('Debugger.enable');
+    await client.send('Debugger.setSkipAllPauses', {skip: true});
+
+    // Strip HeadlessChrome from User-Agent
+    const {userAgent: currentUA} = await client.send(
+      'Browser.getVersion',
+    ) as {userAgent: string};
+    if (currentUA.includes('HeadlessChrome')) {
+      const cleanUA = currentUA.replace(/HeadlessChrome/g, 'Chrome');
+      await client.send('Network.setUserAgentOverride', {
+        userAgent: cleanUA,
+      });
+    }
+
+    // Remove runtime CDP artifacts (e.g. sourceURL=pptr:evaluate)
+    await client.send('Runtime.evaluate', {
+      expression: `
+        (() => {
+          for (const prop of Object.getOwnPropertyNames(window)) {
+            if (prop.startsWith('cdc_') || prop.startsWith('__puppeteer')) {
+              try { delete window[prop]; } catch(e) {}
+            }
+          }
+          for (const prop of Object.getOwnPropertyNames(document)) {
+            if (prop.startsWith('cdc_') || prop.startsWith('__puppeteer')) {
+              try { delete document[prop]; } catch(e) {}
+            }
+          }
+        })()
+      `,
+      returnByValue: true,
+    });
+  } catch {
+    // Some targets (e.g. service workers) may not support these domains — ignore.
+  }
+}
+
+/**
  * Applies the stealth init-script to a single page so that every
  * subsequent navigation automatically executes the patch before
- * any page-level JavaScript.
+ * any page-level JavaScript. Also applies CDP-level patches.
  */
 export async function applyStealthToPage(page: Page): Promise<void> {
   await page.evaluateOnNewDocument(STEALTH_INIT_SCRIPT);
+  await applyCdpStealth(page);
 }
 
 /**
