@@ -147,6 +147,12 @@ export const cliOptions = {
     type: 'boolean',
     description: `If enabled, ignores errors relative to self-signed and expired certificates. Use with caution.`,
   },
+  experimentalPageIdRouting: {
+    type: 'boolean',
+    describe:
+      'Whether to expose pageId on page-scoped tools and route requests by page ID.',
+    hidden: true,
+  },
   experimentalDevtools: {
     type: 'boolean',
     describe: 'Whether to enable automation over DevTools targets',
@@ -172,6 +178,11 @@ export const cliOptions = {
     type: 'boolean',
     describe: 'Whether to enable interoperability tools',
     hidden: true,
+  },
+  experimentalScreencast: {
+    type: 'boolean',
+    describe:
+      'Exposes experimental screencast tools (requires ffmpeg). Install ffmpeg https://www.ffmpeg.org/download.html and ensure it is available in the MCP server PATH.',
   },
   stealth: {
     type: 'boolean',
@@ -237,7 +248,14 @@ export const cliOptions = {
     hidden: true,
     describe: 'Include watchdog PID in Clearcut request headers (for testing).',
   },
+  slim: {
+    type: 'boolean',
+    describe:
+      'Exposes a "slim" set of 3 tools covering navigation, script execution and screenshots only. Useful for basic browser tasks.',
+  },
 } satisfies Record<string, YargsOptions>;
+
+export type ParsedArguments = ReturnType<typeof parseArguments>;
 
 export function parseArguments(version: string, argv = process.argv) {
   const yargsInstance = yargs(hideBin(argv))
@@ -312,6 +330,10 @@ export function parseArguments(version: string, argv = process.argv) {
       [
         '$0 --no-performance-crux',
         'Disable CrUX (field data) integration in performance tools.',
+      ],
+      [
+        '$0 --slim',
+        'Only 3 tools: navigation, JavaScript execution and screenshot',
       ],
       [
         '$0 --no-stealth',

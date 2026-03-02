@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {ParsedArguments} from './cli.js';
 import {ConsoleFormatter} from './formatters/ConsoleFormatter.js';
 import {IssueFormatter} from './formatters/IssueFormatter.js';
 import {NetworkFormatter} from './formatters/NetworkFormatter.js';
 import {SnapshotFormatter} from './formatters/SnapshotFormatter.js';
 import type {McpContext} from './McpContext.js';
+import type {McpPage} from './McpPage.js';
 import {UncaughtError} from './PageCollector.js';
 import {DevTools} from './third_party/index.js';
 import type {
@@ -21,6 +23,7 @@ import {handleDialog} from './tools/pages.js';
 import type {
   DevToolsData,
   ImageContentData,
+  LighthouseData,
   Response,
   SnapshotParams,
 } from './tools/ToolDefinition.js';
@@ -38,6 +41,7 @@ interface TraceInsightData {
 
 export class McpResponse implements Response {
   #includePages = false;
+  #includeExtensionServiceWorkers = false;
   #snapshotParams?: SnapshotParams;
   #attachedNetworkRequestId?: number;
   #attachedNetworkRequestOptions?: {
@@ -47,6 +51,7 @@ export class McpResponse implements Response {
   #attachedConsoleMessageId?: number;
   #attachedTraceSummary?: TraceResult;
   #attachedTraceInsight?: TraceInsightData;
+  #attachedLighthouseResult?: LighthouseData;
   #textResponseLines: string[] = [];
   #images: ImageContentData[] = [];
   #networkRequestsOptions?: {
@@ -65,6 +70,16 @@ export class McpResponse implements Response {
   #listExtensions?: boolean;
   #devToolsData?: DevToolsData;
   #tabId?: string;
+  #args: ParsedArguments;
+  #page?: McpPage;
+
+  constructor(args: ParsedArguments) {
+    this.#args = args;
+  }
+
+  setPage(page: McpPage): void {
+    this.#page = page;
+  }
 
   attachDevToolsData(data: DevToolsData): void {
     this.#devToolsData = data;
@@ -76,6 +91,10 @@ export class McpResponse implements Response {
 
   setIncludePages(value: boolean): void {
     this.#includePages = value;
+
+    if (this.#args.categoryExtensions) {
+      this.#includeExtensionServiceWorkers = value;
+    }
   }
 
   includeSnapshot(params?: SnapshotParams): void {
@@ -170,6 +189,10 @@ export class McpResponse implements Response {
     };
   }
 
+  attachLighthouseResult(result: LighthouseData): void {
+    this.#attachedLighthouseResult = result;
+  }
+
   get includePages(): boolean {
     return this.#includePages;
   }
@@ -180,6 +203,10 @@ export class McpResponse implements Response {
 
   get attachedTracedInsight(): TraceInsightData | undefined {
     return this.#attachedTraceInsight;
+  }
+
+  get attachedLighthouseResult(): LighthouseData | undefined {
+    return this.#attachedLighthouseResult;
   }
 
   get includeNetworkRequests(): boolean {
@@ -233,13 +260,21 @@ export class McpResponse implements Response {
       await context.createPagesSnapshot();
     }
 
+    if (this.#includeExtensionServiceWorkers) {
+      await context.createExtensionServiceWorkersSnapshot();
+    }
+
     let snapshot: SnapshotFormatter | string | undefined;
     if (this.#snapshotParams) {
+      if (!this.#page) {
+        throw new Error('Response must have a page');
+      }
       await context.createTextSnapshot(
+        this.#page,
         this.#snapshotParams.verbose,
         this.#devToolsData,
       );
-      const textSnapshot = context.getTextSnapshot();
+      const textSnapshot = this.#page.textSnapshot;
       if (textSnapshot) {
         const formatter = new SnapshotFormatter(textSnapshot);
         if (this.#snapshotParams.filePath) {
@@ -256,7 +291,11 @@ export class McpResponse implements Response {
 
     let detailedNetworkRequest: NetworkFormatter | undefined;
     if (this.#attachedNetworkRequestId) {
+      if (!this.#page) {
+        throw new Error(`Response must have an McpPage`);
+      }
       const request = context.getNetworkRequestById(
+        this.#page,
         this.#attachedNetworkRequestId,
       );
       const formatter = await NetworkFormatter.from(request, {
@@ -273,13 +312,18 @@ export class McpResponse implements Response {
     let detailedConsoleMessage: ConsoleFormatter | IssueFormatter | undefined;
 
     if (this.#attachedConsoleMessageId) {
+      if (!this.#page) {
+        throw new Error(`Response must have an McpPage`);
+      }
+
       const message = context.getConsoleMessageById(
+        this.#page,
         this.#attachedConsoleMessageId,
       );
       const consoleMessageStableId = this.#attachedConsoleMessageId;
       if ('args' in message || message instanceof UncaughtError) {
         const consoleMessage = message as ConsoleMessage | UncaughtError;
-        const devTools = context.getDevToolsUniverse();
+        const devTools = context.getDevToolsUniverse(this.#page);
         detailedConsoleMessage = await ConsoleFormatter.from(consoleMessage, {
           id: consoleMessageStableId,
           fetchDetailedData: true,
@@ -288,8 +332,14 @@ export class McpResponse implements Response {
       } else if (message instanceof DevTools.AggregatedIssue) {
         const formatter = new IssueFormatter(message, {
           id: consoleMessageStableId,
-          requestIdResolver: context.resolveCdpRequestId.bind(context),
-          elementIdResolver: context.resolveCdpElementId.bind(context),
+          requestIdResolver: context.resolveCdpRequestId.bind(
+            context,
+            this.#page,
+          ),
+          elementIdResolver: context.resolveCdpElementId.bind(
+            context,
+            this.#page,
+          ),
         });
         if (!formatter.isValid()) {
           throw new Error(
@@ -306,7 +356,12 @@ export class McpResponse implements Response {
     }
     let consoleMessages: Array<ConsoleFormatter | IssueFormatter> | undefined;
     if (this.#consoleDataOptions?.include) {
+      if (!this.#page) {
+        throw new Error(`Response must have an McpPage`);
+      }
+      const page = this.#page;
       let messages = context.getConsoleData(
+        this.#page,
         this.#consoleDataOptions.includePreservedMessages,
       );
 
@@ -331,7 +386,7 @@ export class McpResponse implements Response {
                 context.getConsoleMessageStableId(item);
               if ('args' in item || item instanceof UncaughtError) {
                 const consoleMessage = item as ConsoleMessage | UncaughtError;
-                const devTools = context.getDevToolsUniverse();
+                const devTools = context.getDevToolsUniverse(page);
                 return await ConsoleFormatter.from(consoleMessage, {
                   id: consoleMessageStableId,
                   fetchDetailedData: false,
@@ -356,7 +411,11 @@ export class McpResponse implements Response {
 
     let networkRequests: NetworkFormatter[] | undefined;
     if (this.#networkRequestsOptions?.include) {
+      if (!this.#page) {
+        throw new Error(`Response must have an McpPage`);
+      }
       let requests = context.getNetworkRequests(
+        this.#page,
         this.#networkRequestsOptions?.includePreservedRequests,
       );
 
@@ -396,6 +455,7 @@ export class McpResponse implements Response {
       traceInsight: this.#attachedTraceInsight,
       traceSummary: this.#attachedTraceSummary,
       extensions,
+      lighthouseResult: this.#attachedLighthouseResult,
     });
   }
 
@@ -411,6 +471,7 @@ export class McpResponse implements Response {
       traceSummary?: TraceResult;
       traceInsight?: TraceInsightData;
       extensions?: InstalledExtension[];
+      lighthouseResult?: LighthouseData;
     },
   ): {content: Array<TextContent | ImageContent>; structuredContent: object} {
     const structuredContent: {
@@ -423,6 +484,7 @@ export class McpResponse implements Response {
       consoleMessages?: object[];
       traceSummary?: string;
       traceInsights?: Array<{insightName: string; insightKey: string}>;
+      lighthouseResult?: object;
       extensions?: object[];
       message?: string;
       networkConditions?: string;
@@ -438,6 +500,7 @@ export class McpResponse implements Response {
       };
       pages?: object[];
       pagination?: object;
+      extensionServiceWorkers?: object[];
     } = {};
 
     const response = [`# ${toolName} response`];
@@ -446,46 +509,45 @@ export class McpResponse implements Response {
       response.push(...this.#textResponseLines);
     }
 
-    const networkConditions = context.getNetworkConditions();
+    const networkConditions = this.#page?.networkConditions;
     if (networkConditions) {
+      const timeout = this.#page!.pptrPage.getDefaultNavigationTimeout();
       response.push(`## Network emulation`);
       response.push(`Emulating: ${networkConditions}`);
-      response.push(
-        `Default navigation timeout set to ${context.getNavigationTimeout()} ms`,
-      );
+      response.push(`Default navigation timeout set to ${timeout} ms`);
       structuredContent.networkConditions = networkConditions;
-      structuredContent.navigationTimeout = context.getNavigationTimeout();
+      structuredContent.navigationTimeout = timeout;
     }
 
-    const viewport = context.getViewport();
+    const viewport = this.#page?.viewport;
     if (viewport) {
       response.push(`## Viewport emulation`);
       response.push(`Emulating viewport: ${JSON.stringify(viewport)}`);
       structuredContent.viewport = viewport;
     }
 
-    const userAgent = context.getUserAgent();
+    const userAgent = this.#page?.userAgent;
     if (userAgent) {
       response.push(`## UserAgent emulation`);
       response.push(`Emulating userAgent: ${userAgent}`);
       structuredContent.userAgent = userAgent;
     }
 
-    const cpuThrottlingRate = context.getCpuThrottlingRate();
+    const cpuThrottlingRate = this.#page?.cpuThrottlingRate ?? 1;
     if (cpuThrottlingRate > 1) {
       response.push(`## CPU emulation`);
       response.push(`Emulating: ${cpuThrottlingRate}x slowdown`);
       structuredContent.cpuThrottlingRate = cpuThrottlingRate;
     }
 
-    const colorScheme = context.getColorScheme();
+    const colorScheme = this.#page?.colorScheme;
     if (colorScheme) {
       response.push(`## Color Scheme emulation`);
       response.push(`Emulating: ${colorScheme}`);
       structuredContent.colorScheme = colorScheme;
     }
 
-    const dialog = context.getDialog();
+    const dialog = this.#page?.getDialog();
     if (dialog) {
       const defaultValueIfNeeded =
         dialog.type() === 'prompt'
@@ -504,18 +566,52 @@ Call ${handleDialog.name} to handle it before continuing.`);
     if (this.#includePages) {
       const parts = [`## Pages`];
       for (const page of context.getPages()) {
+        const isolatedContextName = context.getIsolatedContextName(page);
+        const contextLabel = isolatedContextName
+          ? ` isolatedContext=${isolatedContextName}`
+          : '';
         parts.push(
-          `${context.getPageId(page)}: ${page.url()}${context.isPageSelected(page) ? ' [selected]' : ''}`,
+          `${context.getPageId(page)}: ${page.url()}${context.isPageSelected(page) ? ' [selected]' : ''}${contextLabel}`,
         );
       }
       response.push(...parts);
       structuredContent.pages = context.getPages().map(page => {
-        return {
+        const isolatedContextName = context.getIsolatedContextName(page);
+        const entry: {
+          id: number | undefined;
+          url: string;
+          selected: boolean;
+          isolatedContext?: string;
+        } = {
           id: context.getPageId(page),
           url: page.url(),
           selected: context.isPageSelected(page),
         };
+        if (isolatedContextName) {
+          entry.isolatedContext = isolatedContextName;
+        }
+        return entry;
       });
+    }
+
+    if (this.#includeExtensionServiceWorkers) {
+      if (!context.getExtensionServiceWorkers().length) {
+        response.push(`## Extension Service Workers`);
+      }
+
+      for (const extensionServiceWorker of context.getExtensionServiceWorkers()) {
+        response.push(
+          `${extensionServiceWorker.id}: ${extensionServiceWorker.url}`,
+        );
+      }
+      structuredContent.extensionServiceWorkers = context
+        .getExtensionServiceWorkers()
+        .map(extensionServiceWorker => {
+          return {
+            id: extensionServiceWorker.id,
+            url: extensionServiceWorker.url,
+          };
+        });
     }
 
     if (this.#tabId) {
@@ -547,6 +643,29 @@ Call ${handleDialog.name} to handle it before continuing.`);
         response.push(insightOutput.error);
       } else {
         response.push(insightOutput.output);
+      }
+    }
+
+    if (data.lighthouseResult) {
+      structuredContent.lighthouseResult = data.lighthouseResult;
+      const {summary, reports} = data.lighthouseResult;
+      response.push('## Lighthouse Audit Results');
+      response.push(`Mode: ${summary.mode}`);
+      response.push(`Device: ${summary.device}`);
+      response.push(`URL: ${summary.url}`);
+      response.push('### Category Scores');
+      for (const score of summary.scores) {
+        response.push(
+          `- ${score.title}: ${(score.score ?? 0) * 100} (${score.id})`,
+        );
+      }
+      response.push('### Audit Summary');
+      response.push(`Passed: ${summary.audits.passed}`);
+      response.push(`Failed: ${summary.audits.failed}`);
+      response.push(`Total Timing: ${summary.timing.total}ms`);
+      response.push('### Reports');
+      for (const report of reports) {
+        response.push(`- ${report}`);
       }
     }
 
@@ -588,21 +707,8 @@ Call ${handleDialog.name} to handle it before continuing.`);
       }
     }
 
-    if (this.#networkRequestsOptions?.include) {
-      let requests = context.getNetworkRequests(
-        this.#networkRequestsOptions?.includePreservedRequests,
-      );
-
-      // Apply resource type filtering if specified
-      if (this.#networkRequestsOptions.resourceTypes?.length) {
-        const normalizedTypes = new Set(
-          this.#networkRequestsOptions.resourceTypes,
-        );
-        requests = requests.filter(request => {
-          const type = request.resourceType();
-          return normalizedTypes.has(type);
-        });
-      }
+    if (this.#networkRequestsOptions?.include && data.networkRequests) {
+      const requests = data.networkRequests;
 
       response.push('## Network requests');
       if (requests.length) {
@@ -614,7 +720,7 @@ Call ${handleDialog.name} to handle it before continuing.`);
         response.push(...paginationData.info);
         if (data.networkRequests) {
           structuredContent.networkRequests = [];
-          for (const formatter of data.networkRequests) {
+          for (const formatter of paginationData.items) {
             response.push(formatter.toString());
             structuredContent.networkRequests.push(formatter.toJSON());
           }

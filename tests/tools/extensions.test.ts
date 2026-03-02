@@ -6,7 +6,7 @@
 
 import assert from 'node:assert';
 import path from 'node:path';
-import {describe, it} from 'node:test';
+import {afterEach, describe, it} from 'node:test';
 
 import sinon from 'sinon';
 
@@ -24,7 +24,7 @@ const EXTENSION_PATH = path.join(
   '../../../tests/tools/fixtures/extension',
 );
 
-function extractId(response: McpResponse) {
+export function extractId(response: McpResponse) {
   const responseLine = response.responseLines[0];
   assert.ok(responseLine, 'Response should not be empty');
   const match = responseLine.match(/Extension installed\. Id: (.+)/);
@@ -34,6 +34,10 @@ function extractId(response: McpResponse) {
 }
 
 describe('extension', () => {
+  afterEach(() => {
+    sinon.restore();
+  });
+
   it('installs and uninstalls an extension and verifies it in chrome://extensions', async () => {
     await withMcpContext(async (response, context) => {
       // Install the extension
@@ -44,7 +48,7 @@ describe('extension', () => {
       );
 
       const extensionId = extractId(response);
-      const page = context.getSelectedPage();
+      const page = context.getSelectedPptrPage();
       await page.goto('chrome://extensions');
 
       const element = await page.waitForSelector(

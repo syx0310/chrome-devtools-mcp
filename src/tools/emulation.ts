@@ -8,7 +8,7 @@
 import {zod, PredefinedNetworkConditions} from '../third_party/index.js';
 
 import {ToolCategory} from './categories.js';
-import {defineTool} from './ToolDefinition.js';
+import {definePageTool} from './ToolDefinition.js';
 
 const throttlingOptions: [string, ...string[]] = [
   'No emulation',
@@ -16,7 +16,7 @@ const throttlingOptions: [string, ...string[]] = [
   ...Object.keys(PredefinedNetworkConditions),
 ];
 
-export const emulate = defineTool({
+export const emulate = definePageTool({
   name: 'emulate',
   description: `Emulates various features on the selected page.`,
   annotations: {
@@ -104,97 +104,7 @@ export const emulate = defineTool({
       ),
   },
   handler: async (request, _response, context) => {
-    const page = context.getSelectedPage();
-    const {
-      networkConditions,
-      cpuThrottlingRate,
-      geolocation,
-      userAgent,
-      viewport,
-    } = request.params;
-
-    if (networkConditions) {
-      if (networkConditions === 'No emulation') {
-        await page.emulateNetworkConditions(null);
-        context.setNetworkConditions(null);
-      } else if (networkConditions === 'Offline') {
-        await page.emulateNetworkConditions({
-          offline: true,
-          download: 0,
-          upload: 0,
-          latency: 0,
-        });
-        context.setNetworkConditions('Offline');
-      } else if (networkConditions in PredefinedNetworkConditions) {
-        const networkCondition =
-          PredefinedNetworkConditions[
-            networkConditions as keyof typeof PredefinedNetworkConditions
-          ];
-        await page.emulateNetworkConditions(networkCondition);
-        context.setNetworkConditions(networkConditions);
-      }
-    }
-
-    if (cpuThrottlingRate) {
-      await page.emulateCPUThrottling(cpuThrottlingRate);
-      context.setCpuThrottlingRate(cpuThrottlingRate);
-    }
-
-    if (geolocation !== undefined) {
-      if (geolocation === null) {
-        await page.setGeolocation({latitude: 0, longitude: 0});
-        context.setGeolocation(null);
-      } else {
-        await page.setGeolocation(geolocation);
-        context.setGeolocation(geolocation);
-      }
-    }
-
-    if (userAgent !== undefined) {
-      if (userAgent === null) {
-        await page.setUserAgent({
-          userAgent: undefined,
-        });
-        context.setUserAgent(null);
-      } else {
-        await page.setUserAgent({
-          userAgent,
-        });
-        context.setUserAgent(userAgent);
-      }
-    }
-
-    if (request.params.colorScheme) {
-      if (request.params.colorScheme === 'auto') {
-        await page.emulateMediaFeatures([
-          {name: 'prefers-color-scheme', value: ''},
-        ]);
-        context.setColorScheme(null);
-      } else {
-        await page.emulateMediaFeatures([
-          {
-            name: 'prefers-color-scheme',
-            value: request.params.colorScheme,
-          },
-        ]);
-        context.setColorScheme(request.params.colorScheme);
-      }
-    }
-
-    if (viewport !== undefined) {
-      if (viewport === null) {
-        await page.setViewport(null);
-        context.setViewport(null);
-      } else {
-        const defaults = {
-          deviceScaleFactor: 1,
-          isMobile: false,
-          hasTouch: false,
-          isLandscape: false,
-        };
-        await page.setViewport({...defaults, ...viewport});
-        context.setViewport({...defaults, ...viewport});
-      }
-    }
+    const page = request.page;
+    await context.emulate(request.params, page.pptrPage);
   },
 });
