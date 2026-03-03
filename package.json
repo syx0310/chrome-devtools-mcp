@@ -8,7 +8,7 @@
   "scripts": {
     "cli:generate": "node --experimental-strip-types scripts/generate-cli.ts",
     "clean": "node -e \"require('fs').rmSync('build', {recursive: true, force: true})\"",
-    "bundle": "npm run clean && npm run build && rollup -c rollup.config.mjs && node -e \"require('fs').rmSync('build/node_modules', {recursive: true, force: true})\" && node --experimental-strip-types scripts/append-lighthouse-notices.ts",
+    "bundle": "npm run clean && npm run build && rollup -c rollup.config.mjs && node -e \"require('fs').rmSync('build/node_modules', {recursive: true, force: true})\" && node --experimental-strip-types scripts/append-lighthouse-notices.ts && node -e \"const f='build/src/third_party/lighthouse-devtools-mcp-bundle.js';require('fs').writeFileSync(f,require('fs').readFileSync(f,'utf8').replace('import puppeteer from \\\"puppeteer-core\\\";','import { puppeteer } from \\\"./index.js\\\";'))\"",
     "build": "tsc && node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/post-build.ts",
     "typecheck": "tsc --noEmit",
     "format": "eslint --cache --fix . && prettier --write --cache .",
@@ -31,7 +31,8 @@
   "files": [
     "build/src",
     "LICENSE",
-    "!*.tsbuildinfo"
+    "!*.tsbuildinfo",
+    "!*.map"
   ],
   "repository": "ChromeDevTools/chrome-devtools-mcp",
   "author": "Google LLC",
