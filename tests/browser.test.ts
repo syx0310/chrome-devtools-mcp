@@ -96,6 +96,62 @@ describe('browser', () => {
     }
   });
 
+  it('launches with anti-devtools-detection mode', async () => {
+    const browser = await launch({
+      headless: true,
+      isolated: true,
+      executablePath: executablePath(),
+      devtools: false,
+      stealth: false,
+      antiDevtoolsDetection: true,
+    });
+    try {
+      const [page] = await browser.pages();
+      await page.goto('about:blank');
+
+      // Window dimensions consistency
+      const dims = await page.evaluate(() => ({
+        dw: window.outerWidth - window.innerWidth,
+        dh: window.outerHeight - window.innerHeight,
+      }));
+      assert.strictEqual(dims.dw, 0);
+      assert.ok(dims.dh > 0 && dims.dh < 150);
+
+      // document.hasFocus() returns true
+      const hasFocus = await page.evaluate(() => document.hasFocus());
+      assert.strictEqual(hasFocus, true);
+
+      // console.log looks native
+      const logStr = await page.evaluate(() => console.log.toString());
+      assert.ok(logStr.includes('[native code]'));
+
+      // Normal timers still work
+      const timerWorks = await page.evaluate(
+        () =>
+          new Promise(resolve => {
+            let count = 0;
+            const id = setInterval(() => {
+              count++;
+              if (count >= 2) {
+                clearInterval(id);
+                resolve(true);
+              }
+            }, 50);
+          }),
+      );
+      assert.strictEqual(timerWorks, true);
+
+      // performance.now() returns integer (1ms precision)
+      const perfRounded = await page.evaluate(() => {
+        const v = performance.now();
+        return v === Math.round(v);
+      });
+      assert.strictEqual(perfRounded, true);
+    } finally {
+      await browser.close();
+    }
+  });
+
   it('connects to an existing browser with userDataDir', async () => {
     const tmpDir = os.tmpdir();
     const folderPath = path.join(tmpDir, `temp-folder-${crypto.randomUUID()}`);

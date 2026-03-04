@@ -17,7 +17,7 @@ import {
 import {McpPage} from './McpPage.js';
 import type {ListenerMap, UncaughtError} from './PageCollector.js';
 import {NetworkCollector, ConsoleCollector} from './PageCollector.js';
-import {applyStealthToPage} from './stealth.js';
+import {applyAntiDevtoolsDetection, applyStealthToPage} from './stealth.js';
 import type {DevTools} from './third_party/index.js';
 import type {
   Browser,
@@ -66,6 +66,8 @@ interface McpContextOptions {
   performanceCrux: boolean;
   // Whether stealth mode is enabled — hides automation signals on new pages.
   stealth?: boolean;
+  // Whether anti-DevTools-detection mode is enabled — blocks detection scripts on new pages.
+  antiDevtoolsDetection?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 5_000;
@@ -282,6 +284,9 @@ export class McpContext implements Context {
     }
     if (this.#options.stealth) {
       await applyStealthToPage(page);
+    }
+    if (this.#options.antiDevtoolsDetection) {
+      await applyAntiDevtoolsDetection(page);
     }
     await this.createPagesSnapshot();
     this.selectPage(this.#getMcpPage(page));

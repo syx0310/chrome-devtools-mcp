@@ -26,6 +26,8 @@ describe('cli args parsing', () => {
     'usage-statistics': true,
     usageStatistics: true,
     stealth: true,
+    'anti-devtools-detection': true,
+    antiDevtoolsDetection: true,
   };
 
   it('parses with default args', async () => {
@@ -304,5 +306,19 @@ describe('cli args parsing', () => {
   it('parses --no-stealth to disable', async () => {
     const args = parseArguments('1.0.0', ['node', 'main.js', '--no-stealth']);
     assert.strictEqual(args.stealth, false);
+  });
+
+  it('anti-devtools-detection is enabled by default', async () => {
+    const args = parseArguments('1.0.0', ['node', 'main.js']);
+    assert.strictEqual(args.antiDevtoolsDetection, true);
+  });
+
+  it('parses --no-anti-devtools-detection to disable', async () => {
+    const args = parseArguments('1.0.0', [
+      'node',
+      'main.js',
+      '--no-anti-devtools-detection',
+    ]);
+    assert.strictEqual(args.antiDevtoolsDetection, false);
   });
 });

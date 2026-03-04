@@ -190,6 +190,12 @@ export const cliOptions = {
     describe:
       'Stealth mode reduces automation detection signals (hides WebDriver, removes automation flags). Enabled by default. Use --no-stealth to disable.',
   },
+  antiDevtoolsDetection: {
+    type: 'boolean',
+    default: true,
+    describe:
+      'Blocks DevTools detection scripts (timer interception, window dimension fixes, console getter prevention). Enabled by default. Use --no-anti-devtools-detection to disable.',
+  },
   chromeArg: {
     type: 'array',
     describe:

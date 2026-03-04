@@ -94,6 +94,7 @@ export async function createMcpServer(
             devtools,
             enableExtensions: serverArgs.categoryExtensions,
             stealth: serverArgs.stealth,
+            antiDevtoolsDetection: serverArgs.antiDevtoolsDetection,
           });
 
     if (context?.browser !== browser) {
@@ -102,6 +103,7 @@ export async function createMcpServer(
         experimentalIncludeAllPages: serverArgs.experimentalIncludeAllPages,
         performanceCrux: serverArgs.performanceCrux,
         stealth: serverArgs.stealth,
+        antiDevtoolsDetection: serverArgs.antiDevtoolsDetection,
       });
     }
     return context;

@@ -5,6 +5,7 @@
  */
 
 import type {Browser, Page} from './third_party/index.js';
+import {CDPSessionEvent} from './third_party/index.js';
 
 /**
  * JavaScript code injected via evaluateOnNewDocument to hide
@@ -158,7 +159,9 @@ export const STEALTH_INIT_SCRIPT = `
   // only fires when DevTools is open and the console is rendered.
   const originalToString = Function.prototype.toString;
   // Ensure our patched functions have native-looking toString
-  const patchedFns = new Set();
+  // Share patchedFns across stealth and anti-devtools-detection scripts
+  const patchedFns = window.__stealthPatchedFns || new Set();
+  window.__stealthPatchedFns = patchedFns;
   const nativeToString = function toString() {
     if (patchedFns.has(this)) {
       return 'function ' + (this.name || '') + '() { [native code] }';
@@ -259,6 +262,339 @@ export async function applyStealthToBrowser(browser: Browser): Promise<void> {
       const page = await target.page();
       if (page) {
         await applyStealthToPage(page);
+      }
+    } catch {
+      // Target may have closed before we could get the page — ignore.
+    }
+  });
+}
+
+/**
+ * JavaScript code injected via evaluateOnNewDocument to block
+ * DevTools detection scripts. This is a separate script from
+ * STEALTH_INIT_SCRIPT and can be enabled/disabled independently.
+ */
+export const ANTI_DEVTOOLS_INIT_SCRIPT = `
+(() => {
+  // 0. Function.prototype.toString patching — share patchedFns with stealth script
+  const originalToString = Function.prototype.toString;
+  const patchedFns = window.__stealthPatchedFns || new Set();
+  if (!window.__stealthPatchedFns) {
+    // Stealth script not loaded — set up toString patching ourselves
+    const nativeToString = function toString() {
+      if (patchedFns.has(this)) {
+        return 'function ' + (this.name || '') + '() { [native code] }';
+      }
+      return originalToString.call(this);
+    };
+    patchedFns.add(nativeToString);
+    Function.prototype.toString = nativeToString;
+  }
+  // Clean up the shared reference from window
+  try { delete window.__stealthPatchedFns; } catch (_e) { /* ignore */ }
+
+  // 0.5 Reduce performance.now() precision to defeat timing-based detection.
+  // performanceChecker measures console.table vs console.log with microsecond
+  // precision. Rounding to 1ms makes both measurements return 0, so the
+  // checker's "tablePrintTime === 0" guard triggers and returns false.
+  const origPerfNow = performance.now.bind(performance);
+  performance.now = function now() {
+    return Math.round(origPerfNow());
+  };
+  patchedFns.add(performance.now);
+
+  // 1. Timer interception — detect and suppress DevTools detection polling
+  // Match known detection patterns in timer callbacks:
+  // - devtool/devtools keywords
+  // - debugger statement (including minified: debugger} debugger;)
+  // - window dimension comparisons
+  // - console timing patterns
+  // - constructor('debugger') pattern used by devtools-detector
+  const DETECT_RE = /devtool|\\bdebugger\\b|outerWidth|outerHeight|innerWidth.{0,20}innerHeight|constructor\\s*\\(\\s*['"]debugger/i;
+
+  const _origSetInterval = window.setInterval;
+  const _origSetTimeout = window.setTimeout;
+
+  function isDetectionCallback(fn) {
+    if (typeof fn === 'function') {
+      try {
+        const src = originalToString.call(fn);
+        return DETECT_RE.test(src);
+      } catch (_e) { return false; }
+    }
+    if (typeof fn === 'string') {
+      return DETECT_RE.test(fn);
+    }
+    return false;
+  }
+
+  window.setInterval = function(fn, delay, ...args) {
+    if (isDetectionCallback(fn)) {
+      return _origSetInterval(() => {}, delay);
+    }
+    return _origSetInterval.call(this, fn, delay, ...args);
+  };
+  window.setTimeout = function(fn, delay, ...args) {
+    if (isDetectionCallback(fn)) {
+      return _origSetTimeout(() => {}, delay);
+    }
+    return _origSetTimeout.call(this, fn, delay, ...args);
+  };
+  patchedFns.add(window.setInterval);
+  patchedFns.add(window.setTimeout);
+
+  // 2. Window dimension consistency — always report values without DevTools docked
+  const CHROME_VERTICAL = 85; // typical title bar + toolbar height
+  Object.defineProperty(window, 'outerWidth', {
+    get: () => window.innerWidth,
+    configurable: true,
+  });
+  Object.defineProperty(window, 'outerHeight', {
+    get: () => window.innerHeight + CHROME_VERTICAL,
+    configurable: true,
+  });
+
+  // 3. Console detection prevention
+  // Performance detection: devtools-detector measures console.table/log timing
+  // with large objects — rendering is slow when DevTools console is open.
+  // toString/getter detection: logs objects with custom toString/getters that
+  // fire only when DevTools renders the console output.
+  // Fix: defer actual console output to next task via setTimeout(0) so timing
+  // measurement returns ~0ms, and sanitize arguments to strip getters/toString.
+  const consoleMethodsToWrap = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'table', 'clear'];
+  for (const method of consoleMethodsToWrap) {
+    const orig = console[method].bind(console);
+    const wrapped = function(...args) {
+      _origSetTimeout.call(window, () => {
+        if (method === 'clear' || args.length === 0) {
+          orig(...args);
+          return;
+        }
+        const safeArgs = args.map(arg => {
+          if (typeof arg === 'function') {
+            return String(arg);
+          }
+          if (arg !== null && typeof arg === 'object') {
+            try { return JSON.parse(JSON.stringify(arg)); }
+            catch (_e) {
+              try { return structuredClone(arg); }
+              catch (_e2) { return String(arg); }
+            }
+          }
+          return arg;
+        });
+        orig(...safeArgs);
+      }, 0);
+    };
+    patchedFns.add(wrapped);
+    console[method] = wrapped;
+  }
+
+  // 4. document.hasFocus() — always return true
+  document.hasFocus = function() { return true; };
+  patchedFns.add(document.hasFocus);
+
+  // 5. Notification.permission — fix 'denied' in automated mode
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+      Object.defineProperty(Notification, 'permission', {
+        get: () => 'default',
+        configurable: true,
+      });
+    }
+  } catch (_e) { /* ignore */ }
+
+  // 6. Block devtoolsFormatters detection.
+  // devtoolsFormatterChecker registers a custom formatter whose header()
+  // fires when DevTools renders console output. Returning a fresh empty
+  // array from the getter ensures pushed formatters are immediately discarded.
+  Object.defineProperty(window, 'devtoolsFormatters', {
+    get: () => [],
+    set: () => {},
+    configurable: true,
+  });
+})();
+`;
+
+/**
+ * Script to apply anti-DevTools-detection patches immediately to an
+ * already-loaded document. Unlike evaluateOnNewDocument (which runs
+ * before page scripts on future navigations), this runs in the current
+ * context where detection scripts may already be active. It clears
+ * existing detection timers and re-applies protections.
+ */
+const ANTI_DEVTOOLS_IMMEDIATE_SCRIPT = `
+(() => {
+  // 1. Clear all existing timers to stop any running detection polling.
+  // This is the same approach as the Tampermonkey anti-detection script.
+  const maxId = setTimeout(() => {}, 0);
+  for (let i = 1; i <= maxId; i++) {
+    clearTimeout(i);
+    clearInterval(i);
+  }
+
+  // 2. Apply dimension overrides (works even on already-loaded pages)
+  Object.defineProperty(window, 'outerWidth', {
+    get: () => window.innerWidth,
+    configurable: true,
+  });
+  Object.defineProperty(window, 'outerHeight', {
+    get: () => window.innerHeight + 85,
+    configurable: true,
+  });
+
+  // 3. Override console methods (detection scripts may have cached
+  // the originals, but overriding the console object properties still
+  // helps for any new detection code and for sites that read console
+  // methods lazily rather than caching them at init time).
+  const _origSetTimeout = setTimeout;
+  const consoleMethodsToWrap = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'table', 'clear'];
+  for (const method of consoleMethodsToWrap) {
+    const orig = console[method].bind(console);
+    console[method] = function(...args) {
+      _origSetTimeout(() => {
+        if (method === 'clear' || args.length === 0) {
+          orig(...args);
+          return;
+        }
+        const safeArgs = args.map(arg => {
+          if (typeof arg === 'function') {
+            return String(arg);
+          }
+          if (arg !== null && typeof arg === 'object') {
+            try { return JSON.parse(JSON.stringify(arg)); }
+            catch { try { return structuredClone(arg); } catch { return String(arg); } }
+          }
+          return arg;
+        });
+        orig(...safeArgs);
+      }, 0);
+    };
+  }
+
+  // 4. document.hasFocus
+  document.hasFocus = function() { return true; };
+
+  // 5. Reduce performance.now() precision
+  const origPerfNow = performance.now.bind(performance);
+  performance.now = function() {
+    return Math.round(origPerfNow());
+  };
+
+  // 6. Block devtoolsFormatters
+  try {
+    Object.defineProperty(window, 'devtoolsFormatters', {
+      get: () => [],
+      set: () => {},
+      configurable: true,
+    });
+  } catch (_e) { /* ignore */ }
+})();
+`;
+
+/**
+ * Apply CDP-level anti-detection patches:
+ * - Skip all debugger pauses to defeat debugger-timing detection
+ *   (the debuggerChecker in devtools-detector uses
+ *   Function('debugger')() and measures if >100ms elapsed).
+ */
+async function applyCdpAntiDetection(page: Page): Promise<void> {
+  try {
+    // @ts-expect-error _client() is internal Puppeteer API
+    const client = page._client();
+    await client.send('Debugger.enable');
+    await client.send('Debugger.setSkipAllPauses', {skip: true});
+  } catch {
+    // Some targets (e.g. service workers) may not support Debugger domain.
+  }
+}
+
+/**
+ * Applies anti-DevTools-detection patches to a single page so that
+ * every subsequent navigation automatically executes the patch before
+ * any page-level JavaScript. Also applies patches immediately to the
+ * current document to handle pages that are already loaded.
+ */
+export async function applyAntiDevtoolsDetection(
+  page: Page,
+): Promise<void> {
+  // Register for all future navigations (runs before page scripts)
+  await page.evaluateOnNewDocument(ANTI_DEVTOOLS_INIT_SCRIPT);
+  // CDP-level patches (debugger skip)
+  await applyCdpAntiDetection(page);
+  // Also apply immediately to the current document (clears existing
+  // detection timers and re-applies protections in case the page has
+  // already loaded with detection scripts running).
+  try {
+    await page.evaluate(ANTI_DEVTOOLS_IMMEDIATE_SCRIPT);
+  } catch {
+    // Page may not be ready (e.g. about:blank with no execution context) — ignore.
+  }
+}
+
+/**
+ * Applies anti-DevTools-detection patches to all existing pages in
+ * the browser and automatically patches any page created afterwards.
+ *
+ * Uses CDP-level auto-attach with waitForDebuggerOnStart to intercept
+ * new pages BEFORE they start executing JavaScript. This prevents the
+ * race condition where detection scripts run before our patches are
+ * applied (e.g. pages opened via window.open or target="_blank").
+ */
+export async function applyAntiDevtoolsDetectionToBrowser(
+  browser: Browser,
+): Promise<void> {
+  const pages = await browser.pages();
+  await Promise.all(pages.map(page => applyAntiDevtoolsDetection(page)));
+
+  // Set up CDP-level auto-attach on a separate browser session.
+  // When a new target is created, Chrome pauses it (waitForDebuggerOnStart)
+  // until we inject our scripts and call Runtime.runIfWaitingForDebugger.
+  // This runs independently of Puppeteer's own auto-attach — the target
+  // waits for ALL sessions to release before executing.
+  try {
+    const browserSession = await browser.target().createCDPSession();
+
+    browserSession.on(CDPSessionEvent.SessionAttached, async (childSession: unknown) => {
+      const session = childSession as {send: (method: string, params?: Record<string, unknown>) => Promise<unknown>};
+      try {
+        await session.send('Page.addScriptToEvaluateOnNewDocument', {
+          source: ANTI_DEVTOOLS_INIT_SCRIPT,
+        });
+      } catch {
+        // Non-page targets (service workers, etc.) don't support Page domain.
+      }
+      try {
+        await session.send('Debugger.enable');
+        await session.send('Debugger.setSkipAllPauses', {skip: true});
+      } catch {
+        // Some targets may not support Debugger domain.
+      }
+      // Resume the target — it won't start until all auto-attach sessions release.
+      try {
+        await session.send('Runtime.runIfWaitingForDebugger');
+      } catch {
+        // Ignore if the target has already closed.
+      }
+    });
+
+    await browserSession.send('Target.setAutoAttach', {
+      autoAttach: true,
+      waitForDebuggerOnStart: true,
+      flatten: true,
+    });
+  } catch {
+    // If CDP auto-attach setup fails, fall back to targetcreated only.
+  }
+
+  // Keep targetcreated handler as a complement: it applies evaluateOnNewDocument
+  // for future navigations within the page and runs the immediate script on the
+  // current document.
+  browser.on('targetcreated', async target => {
+    try {
+      const page = await target.page();
+      if (page) {
+        await applyAntiDevtoolsDetection(page);
       }
     } catch {
       // Target may have closed before we could get the page — ignore.

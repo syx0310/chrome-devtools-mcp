@@ -10,7 +10,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {logger} from './logger.js';
-import {applyStealthToBrowser} from './stealth.js';
+import {
+  applyAntiDevtoolsDetectionToBrowser,
+  applyStealthToBrowser,
+} from './stealth.js';
 import type {
   Browser,
   ChromeReleaseChannel,
@@ -149,6 +152,7 @@ interface McpLaunchOptions {
   devtools: boolean;
   enableExtensions?: boolean;
   stealth?: boolean;
+  antiDevtoolsDetection?: boolean;
 }
 
 export function detectDisplay(): void {
@@ -262,6 +266,9 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
     }
     if (options.stealth) {
       await applyStealthToBrowser(browser);
+    }
+    if (options.antiDevtoolsDetection) {
+      await applyAntiDevtoolsDetectionToBrowser(browser);
     }
     return browser;
   } catch (error) {
