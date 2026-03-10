@@ -67,6 +67,7 @@ export async function ensureBrowserConnected(options: {
     handleDevToolsAsPage: true,
   };
 
+  let autoConnect = false;
   if (options.wsEndpoint) {
     connectOptions.browserWSEndpoint = options.wsEndpoint;
     if (options.wsHeaders) {
@@ -77,6 +78,7 @@ export async function ensureBrowserConnected(options: {
   } else if (channel || options.userDataDir) {
     const userDataDir = options.userDataDir;
     if (userDataDir) {
+      autoConnect = true;
       // TODO: re-expose this logic via Puppeteer.
       const portPath = path.join(userDataDir, 'DevToolsActivePort');
       try {
@@ -100,7 +102,7 @@ export async function ensureBrowserConnected(options: {
         connectOptions.browserWSEndpoint = browserWSEndpoint;
       } catch (error) {
         throw new Error(
-          `Could not connect to Chrome in ${userDataDir}. Check if Chrome is running and remote debugging is enabled.`,
+          `Could not connect to Chrome in ${userDataDir}. Check if Chrome is running and remote debugging is enabled by going to chrome://inspect/#remote-debugging.`,
           {
             cause: error,
           },
@@ -125,7 +127,7 @@ export async function ensureBrowserConnected(options: {
     browser = await puppeteer.connect(connectOptions);
   } catch (err) {
     throw new Error(
-      'Could not connect to Chrome. Check if Chrome is running and remote debugging is enabled by going to chrome://inspect/#remote-debugging.',
+      `Could not connect to Chrome. ${autoConnect ? `Check if Chrome is running and remote debugging is enabled by going to chrome://inspect/#remote-debugging.` : `Check if Chrome is running.`}`,
       {
         cause: err,
       },
@@ -153,6 +155,7 @@ interface McpLaunchOptions {
   enableExtensions?: boolean;
   stealth?: boolean;
   antiDevtoolsDetection?: boolean;
+  viaCli?: boolean;
 }
 
 export function detectDisplay(): void {
@@ -185,7 +188,7 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
     userDataDir = path.join(
       os.homedir(),
       '.cache',
-      'chrome-devtools-mcp',
+      options.viaCli ? 'chrome-devtools-mcp-cli' : 'chrome-devtools-mcp',
       profileDirName,
     );
     await fs.promises.mkdir(userDataDir, {

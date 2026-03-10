@@ -9,9 +9,11 @@ import fs from 'node:fs';
 import net from 'node:net';
 
 import {logger} from '../logger.js';
+import type {CallToolResult} from '../third_party/index.js';
 import {PipeTransport} from '../third_party/index.js';
+import {saveTemporaryFile} from '../utils/files.js';
 
-import type {DaemonMessage} from './types.js';
+import type {DaemonMessage, DaemonResponse} from './types.js';
 import {
   DAEMON_SCRIPT_PATH,
   getSocketPath,
@@ -19,12 +21,29 @@ import {
   isDaemonRunning,
 } from './utils.js';
 
+const FILE_TIMEOUT = 10_000;
+
 /**
- * Waits for a file to be created and populated.
+ * Waits for a file to be created and populated (removed = false) or removed (removed = true).
  */
-function waitForFile(filePath: string, timeout = 5000) {
+function waitForFile(filePath: string, removed = false) {
   return new Promise<void>((resolve, reject) => {
-    if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+    const check = () => {
+      const exists = fs.existsSync(filePath);
+      if (removed) {
+        return !exists;
+      }
+      if (!exists) {
+        return false;
+      }
+      try {
+        return fs.statSync(filePath).size > 0;
+      } catch {
+        return false;
+      }
+    };
+
+    if (check()) {
       resolve();
       return;
     }
@@ -32,14 +51,16 @@ function waitForFile(filePath: string, timeout = 5000) {
     const timer = setTimeout(() => {
       fs.unwatchFile(filePath);
       reject(
-        new Error(`Timeout: file ${filePath} not found within ${timeout}ms`),
+        new Error(
+          `Timeout: file ${filePath} ${removed ? 'not removed' : 'not found'} within ${FILE_TIMEOUT}ms`,
+        ),
       );
-    }, timeout);
+    }, FILE_TIMEOUT);
 
-    fs.watchFile(filePath, {interval: 500}, curr => {
-      if (curr.size > 0) {
+    fs.watchFile(filePath, {interval: 500}, () => {
+      if (check()) {
         clearTimeout(timer);
-        fs.unwatchFile(filePath); // Always clean up your listeners!
+        fs.unwatchFile(filePath);
         resolve();
       }
     });
@@ -52,27 +73,22 @@ export async function startDaemon(mcpArgs: string[] = []) {
     return;
   }
 
-  logger('Starting daemon...');
+  const pidFilePath = getPidFilePath();
+
+  if (fs.existsSync(pidFilePath)) {
+    fs.unlinkSync(pidFilePath);
+  }
+
+  logger('Starting daemon...', ...mcpArgs);
   const child = spawn(process.execPath, [DAEMON_SCRIPT_PATH, ...mcpArgs], {
     detached: true,
     stdio: 'ignore',
+    env: process.env,
     cwd: process.cwd(),
   });
-
-  await new Promise<void>((resolve, reject) => {
-    child.on('error', err => {
-      reject(err);
-    });
-    child.on('exit', code => {
-      logger(`Child exited with code ${code}`);
-      reject(new Error(`Daemon process exited prematurely with code ${code}`));
-    });
-
-    waitForFile(getPidFilePath()).then(resolve).catch(reject);
-  });
-
   child.unref();
-  logger(`Pid file found ${getPidFilePath()}`);
+
+  await waitForFile(pidFilePath);
 }
 
 const SEND_COMMAND_TIMEOUT = 60_000; // ms
@@ -80,7 +96,9 @@ const SEND_COMMAND_TIMEOUT = 60_000; // ms
 /**
  * `sendCommand` opens a socket connection sends a single command and disconnects.
  */
-async function sendCommand(command: DaemonMessage) {
+export async function sendCommand(
+  command: DaemonMessage,
+): Promise<DaemonResponse> {
   const socketPath = getSocketPath();
 
   const socket = net.createConnection({
@@ -120,5 +138,50 @@ export async function stopDaemon() {
     return;
   }
 
+  const pidFilePath = getPidFilePath();
+
   await sendCommand({method: 'stop'});
+
+  await waitForFile(pidFilePath, /*removed=*/ true);
+}
+
+export async function handleResponse(
+  response: CallToolResult,
+  format: 'json' | 'md',
+): Promise<string> {
+  if (response.isError) {
+    return JSON.stringify(response.content);
+  }
+  if (format === 'json') {
+    if (response.structuredContent) {
+      return JSON.stringify(response.structuredContent);
+    }
+    // Fall-through to text for backward compatibility.
+  }
+  const chunks = [];
+  for (const content of response.content) {
+    if (content.type === 'text') {
+      chunks.push(content.text);
+    } else if (content.type === 'image') {
+      const imageData = content.data;
+      const mimeType = content.mimeType;
+      let extension = '.png';
+      switch (mimeType) {
+        case 'image/jpg':
+        case 'image/jpeg':
+          extension = '.jpeg';
+          break;
+        case 'webp':
+          extension = '.webp';
+          break;
+      }
+      const data = Buffer.from(imageData, 'base64');
+      const name = crypto.randomUUID();
+      const {filepath} = await saveTemporaryFile(data, `${name}${extension}`);
+      chunks.push(`Saved to ${filepath}.`);
+    } else {
+      throw new Error('Not supported response content type');
+    }
+  }
+  return format === 'md' ? chunks.join(' ') : JSON.stringify(chunks);
 }

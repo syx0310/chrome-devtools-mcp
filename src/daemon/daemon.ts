@@ -11,11 +11,12 @@ import {createServer, type Server} from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-
 import {logger} from '../logger.js';
-import {PipeTransport} from '../third_party/index.js';
+import {
+  Client,
+  PipeTransport,
+  StdioClientTransport,
+} from '../third_party/index.js';
 import {VERSION} from '../version.js';
 
 import type {DaemonMessage} from './types.js';
@@ -41,6 +42,8 @@ fs.writeFileSync(pidFilePath, process.pid.toString());
 logger(`Writing ${process.pid.toString()} to ${pidFilePath}`);
 
 const socketPath = getSocketPath();
+
+const startDate = new Date();
 
 let mcpClient: Client | null = null;
 let mcpTransport: StdioClientTransport | null = null;
@@ -107,7 +110,18 @@ async function handleRequest(msg: DaemonMessage) {
         success: true,
         message: 'stopping',
       };
-    } else {
+    } else if (msg.method === 'status') {
+      return {
+        success: true,
+        result: JSON.stringify({
+          pid: process.pid,
+          socketPath,
+          startDate: startDate.toISOString(),
+          version: VERSION,
+        }),
+      };
+    }
+    {
       return {
         success: false,
         error: `Unknown method: ${JSON.stringify(msg, null, 2)}`,

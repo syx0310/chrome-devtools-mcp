@@ -28,7 +28,7 @@ const filePathSchema = zod
 
 export const startTrace = definePageTool({
   name: 'performance_start_trace',
-  description: `Starts a performance trace recording on the selected page. This can be used to look for performance problems and insights to improve the performance of the page. It will also report Core Web Vital (CWV) scores for the page.`,
+  description: `Start a performance trace on the selected webpage. Use to find frontend performance issues, Core Web Vitals (LCP, INP, CLS), and improve page load speed.`,
   annotations: {
     category: ToolCategory.PERFORMANCE,
     readOnlyHint: false,
@@ -36,11 +36,13 @@ export const startTrace = definePageTool({
   schema: {
     reload: zod
       .boolean()
+      .default(true)
       .describe(
         'Determines if, once tracing has started, the current selected page should be automatically reloaded. Navigate the page to the right URL using the navigate_page tool BEFORE starting the trace if reload or autoStop is set to true.',
       ),
     autoStop: zod
       .boolean()
+      .default(true)
       .describe(
         'Determines if the trace recording should be automatically stopped.',
       ),
@@ -115,7 +117,7 @@ export const startTrace = definePageTool({
 export const stopTrace = definePageTool({
   name: 'performance_stop_trace',
   description:
-    'Stops the active performance trace recording on the selected page.',
+    'Stop the active performance trace recording on the selected webpage.',
   annotations: {
     category: ToolCategory.PERFORMANCE,
     readOnlyHint: false,

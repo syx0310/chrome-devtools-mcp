@@ -5,7 +5,6 @@
  */
 
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import type {TargetUniverse} from './DevtoolsUtils.js';
@@ -48,6 +47,7 @@ import {
   ExtensionRegistry,
   type InstalledExtension,
 } from './utils/ExtensionRegistry.js';
+import {saveTemporaryFile} from './utils/files.js';
 import {WaitForHelper} from './WaitForHelper.js';
 
 export type {
@@ -810,18 +810,7 @@ export class McpContext implements Context {
     data: Uint8Array<ArrayBufferLike>,
     filename: string,
   ): Promise<{filepath: string}> {
-    try {
-      const dir = await fs.mkdtemp(
-        path.join(os.tmpdir(), 'chrome-devtools-mcp-'),
-      );
-
-      const filepath = path.join(dir, filename);
-      await fs.writeFile(filepath, data);
-      return {filepath};
-    } catch (err) {
-      this.logger(err);
-      throw new Error('Could not save a file', {cause: err});
-    }
+    return await saveTemporaryFile(data, filename);
   }
   async saveFile(
     data: Uint8Array<ArrayBufferLike>,
@@ -938,7 +927,6 @@ export class McpContext implements Context {
     const session = await this.browser.target().createCDPSession();
 
     try {
-      // @ts-expect-error triggerAction is not yet available
       await session.send('Extensions.triggerAction', {
         id,
         targetId: theTarget,
