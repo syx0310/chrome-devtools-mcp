@@ -90,7 +90,25 @@ describe('browser', () => {
       // Navigate to a blank page so the stealth init script executes.
       await page.goto('about:blank');
       const webdriver = await page.evaluate(() => navigator.webdriver);
-      assert.strictEqual(webdriver, undefined);
+      assert.strictEqual(webdriver, false);
+
+      // Verify prototype-level patch (bypasses instance-level overrides)
+      const prototypeCheck = await page.evaluate(() => {
+        const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+        return desc && typeof desc.get === 'function' && desc.get.call(navigator) === false;
+      });
+      assert.strictEqual(prototypeCheck, true);
+
+      // Verify 'webdriver' in navigator (property exists, just returns false)
+      const inCheck = await page.evaluate(() => 'webdriver' in navigator);
+      assert.strictEqual(inCheck, true);
+
+      // Verify toString() looks native
+      const toStringCheck = await page.evaluate(() => {
+        const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+        return desc!.get!.toString().includes('[native code]');
+      });
+      assert.strictEqual(toStringCheck, true);
     } finally {
       await browser.close();
     }

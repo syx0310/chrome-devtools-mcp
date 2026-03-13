@@ -13,11 +13,27 @@ import {CDPSessionEvent} from './third_party/index.js';
  */
 export const STEALTH_INIT_SCRIPT = `
 (() => {
-  // 1. navigator.webdriver → undefined
-  Object.defineProperty(navigator, 'webdriver', {
-    get: () => undefined,
-    configurable: true,
-  });
+  // 1. navigator.webdriver → false (like real non-automated Chrome)
+  // Must patch Navigator.prototype (not navigator instance) because
+  // anti-detection checks can bypass instance-level patches via:
+  //   Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver').get.apply(navigator)
+  const __wdDesc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+  if (__wdDesc && __wdDesc.get) {
+    const __origWdGetter = __wdDesc.get;
+    Object.defineProperty(Navigator.prototype, 'webdriver', {
+      set: undefined,
+      enumerable: true,
+      configurable: true,
+      get: new Proxy(__origWdGetter, {
+        apply: (target, thisArg, args) => {
+          // Call original to validate 'this' binding (throws TypeError for
+          // wrong type, matching native behavior)
+          Reflect.apply(target, thisArg, args);
+          return false;
+        }
+      })
+    });
+  }
 
   // 2. navigator.plugins — fake 5 common plugins
   const fakePlugins = [
@@ -47,16 +63,40 @@ export const STEALTH_INIT_SCRIPT = `
     return null;
   }});
 
-  Object.defineProperty(navigator, 'plugins', {
-    get: () => pluginArray,
-    configurable: true,
-  });
+  // Patch Navigator.prototype.plugins (not navigator instance) to avoid
+  // Object.getOwnPropertyNames(navigator) revealing own-property overrides.
+  const __pluginsDesc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'plugins');
+  if (__pluginsDesc && __pluginsDesc.get) {
+    const __origPluginsGetter = __pluginsDesc.get;
+    Object.defineProperty(Navigator.prototype, 'plugins', {
+      set: undefined,
+      enumerable: true,
+      configurable: true,
+      get: new Proxy(__origPluginsGetter, {
+        apply: (target, thisArg, args) => {
+          Reflect.apply(target, thisArg, args);
+          return pluginArray;
+        }
+      })
+    });
+  }
 
-  // 3. navigator.languages
-  Object.defineProperty(navigator, 'languages', {
-    get: () => ['en-US', 'en'],
-    configurable: true,
-  });
+  // 3. navigator.languages — patch on prototype
+  const __langsDesc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'languages');
+  if (__langsDesc && __langsDesc.get) {
+    const __origLangsGetter = __langsDesc.get;
+    Object.defineProperty(Navigator.prototype, 'languages', {
+      set: undefined,
+      enumerable: true,
+      configurable: true,
+      get: new Proxy(__origLangsGetter, {
+        apply: (target, thisArg, args) => {
+          Reflect.apply(target, thisArg, args);
+          return Object.freeze(['en-US', 'en']);
+        }
+      })
+    });
+  }
 
   // 4. window.chrome — fake chrome.runtime, chrome.loadTimes, chrome.csi
   if (!window.chrome) {
@@ -102,10 +142,23 @@ export const STEALTH_INIT_SCRIPT = `
         const win = iframeContentWindowGetter.get.call(this);
         if (win) {
           try {
-            Object.defineProperty(win.navigator, 'webdriver', {
-              get: () => undefined,
-              configurable: true,
-            });
+            // Patch Navigator.prototype in the iframe's own realm
+            const iframeNavProto = win.Navigator?.prototype || Object.getPrototypeOf(win.navigator);
+            const iframeWdDesc = Object.getOwnPropertyDescriptor(iframeNavProto, 'webdriver');
+            if (iframeWdDesc && iframeWdDesc.get) {
+              const iframeOrigGetter = iframeWdDesc.get;
+              Object.defineProperty(iframeNavProto, 'webdriver', {
+                set: undefined,
+                enumerable: true,
+                configurable: true,
+                get: new Proxy(iframeOrigGetter, {
+                  apply: (target, thisArg, args) => {
+                    Reflect.apply(target, thisArg, args);
+                    return false;
+                  }
+                })
+              });
+            }
           } catch (_e) {
             // cross-origin — ignore
           }
