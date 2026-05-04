@@ -94,8 +94,15 @@ describe('browser', () => {
 
       // Verify prototype-level patch (bypasses instance-level overrides)
       const prototypeCheck = await page.evaluate(() => {
-        const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
-        return desc && typeof desc.get === 'function' && desc.get.call(navigator) === false;
+        const desc = Object.getOwnPropertyDescriptor(
+          Navigator.prototype,
+          'webdriver',
+        );
+        return (
+          desc &&
+          typeof desc.get === 'function' &&
+          desc.get.call(navigator) === false
+        );
       });
       assert.strictEqual(prototypeCheck, true);
 
@@ -105,7 +112,10 @@ describe('browser', () => {
 
       // Verify toString() looks native
       const toStringCheck = await page.evaluate(() => {
-        const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+        const desc = Object.getOwnPropertyDescriptor(
+          Navigator.prototype,
+          'webdriver',
+        );
         return desc!.get!.toString().includes('[native code]');
       });
       assert.strictEqual(toStringCheck, true);

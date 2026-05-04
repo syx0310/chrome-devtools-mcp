@@ -259,9 +259,9 @@ async function applyCdpStealth(page: Page): Promise<void> {
     await client.send('Debugger.setSkipAllPauses', {skip: true});
 
     // Strip HeadlessChrome from User-Agent
-    const {userAgent: currentUA} = await client.send(
+    const {userAgent: currentUA} = (await client.send(
       'Browser.getVersion',
-    ) as {userAgent: string};
+    )) as {userAgent: string};
     if (currentUA.includes('HeadlessChrome')) {
       const cleanUA = currentUA.replace(/HeadlessChrome/g, 'Chrome');
       await client.send('Network.setUserAgentOverride', {
@@ -568,9 +568,7 @@ async function applyCdpAntiDetection(page: Page): Promise<void> {
  * any page-level JavaScript. Also applies patches immediately to the
  * current document to handle pages that are already loaded.
  */
-export async function applyAntiDevtoolsDetection(
-  page: Page,
-): Promise<void> {
+export async function applyAntiDevtoolsDetection(page: Page): Promise<void> {
   // Register for all future navigations (runs before page scripts)
   await page.evaluateOnNewDocument(ANTI_DEVTOOLS_INIT_SCRIPT);
   // CDP-level patches (debugger skip)
@@ -608,28 +606,36 @@ export async function applyAntiDevtoolsDetectionToBrowser(
   try {
     const browserSession = await browser.target().createCDPSession();
 
-    browserSession.on(CDPSessionEvent.SessionAttached, async (childSession: unknown) => {
-      const session = childSession as {send: (method: string, params?: Record<string, unknown>) => Promise<unknown>};
-      try {
-        await session.send('Page.addScriptToEvaluateOnNewDocument', {
-          source: ANTI_DEVTOOLS_INIT_SCRIPT,
-        });
-      } catch {
-        // Non-page targets (service workers, etc.) don't support Page domain.
-      }
-      try {
-        await session.send('Debugger.enable');
-        await session.send('Debugger.setSkipAllPauses', {skip: true});
-      } catch {
-        // Some targets may not support Debugger domain.
-      }
-      // Resume the target — it won't start until all auto-attach sessions release.
-      try {
-        await session.send('Runtime.runIfWaitingForDebugger');
-      } catch {
-        // Ignore if the target has already closed.
-      }
-    });
+    browserSession.on(
+      CDPSessionEvent.SessionAttached,
+      async (childSession: unknown) => {
+        const session = childSession as {
+          send: (
+            method: string,
+            params?: Record<string, unknown>,
+          ) => Promise<unknown>;
+        };
+        try {
+          await session.send('Page.addScriptToEvaluateOnNewDocument', {
+            source: ANTI_DEVTOOLS_INIT_SCRIPT,
+          });
+        } catch {
+          // Non-page targets (service workers, etc.) don't support Page domain.
+        }
+        try {
+          await session.send('Debugger.enable');
+          await session.send('Debugger.setSkipAllPauses', {skip: true});
+        } catch {
+          // Some targets may not support Debugger domain.
+        }
+        // Resume the target — it won't start until all auto-attach sessions release.
+        try {
+          await session.send('Runtime.runIfWaitingForDebugger');
+        } catch {
+          // Ignore if the target has already closed.
+        }
+      },
+    );
 
     await browserSession.send('Target.setAutoAttach', {
       autoAttach: true,
