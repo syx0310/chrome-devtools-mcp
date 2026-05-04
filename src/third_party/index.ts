@@ -16,6 +16,7 @@ export type {Flags, Result, RunnerResult, OutputMode};
 export type {Options as YargsOptions} from 'yargs';
 export {default as yargs} from 'yargs';
 export {hideBin} from 'yargs/helpers';
+export {default as semver} from 'semver';
 export {default as debug} from 'debug';
 export type {Debugger} from 'debug';
 export {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -41,7 +42,7 @@ export {default as puppeteer} from 'puppeteer-core';
 export type * from 'puppeteer-core';
 export {PipeTransport} from 'puppeteer-core/internal/node/PipeTransport.js';
 export type {CdpPage} from 'puppeteer-core/internal/cdp/Page.js';
-export type {JSONSchema7} from 'json-schema';
+export type {JSONSchema7, JSONSchema7Definition} from 'json-schema';
 export {
   resolveDefaultUserDataDir,
   detectBrowserPlatform,

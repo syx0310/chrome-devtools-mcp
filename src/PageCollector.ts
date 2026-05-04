@@ -11,6 +11,7 @@ import type {
   CDPSession,
   ConsoleMessage,
   Protocol,
+  Issue,
 } from './third_party/index.js';
 import {DevTools} from './third_party/index.js';
 import {
@@ -21,6 +22,11 @@ import {
   type Page,
   type PageEvents as PuppeteerPageEvents,
 } from './third_party/index.js';
+import {
+  createIdGenerator,
+  stableIdSymbol,
+  type WithSymbolId,
+} from './utils/id.js';
 
 export class UncaughtError {
   readonly details: Protocol.Runtime.ExceptionDetails;
@@ -33,27 +39,12 @@ export class UncaughtError {
 }
 
 interface PageEvents extends PuppeteerPageEvents {
-  issue: DevTools.AggregatedIssue;
+  devtoolsAggregatedIssue: DevTools.AggregatedIssue;
   uncaughtError: UncaughtError;
 }
 
 export type ListenerMap<EventMap extends PageEvents = PageEvents> = {
   [K in keyof EventMap]?: (event: EventMap[K]) => void;
-};
-
-function createIdGenerator() {
-  let i = 1;
-  return () => {
-    if (i === Number.MAX_SAFE_INTEGER) {
-      i = 0;
-    }
-    return i++;
-  };
-}
-
-export const stableIdSymbol = Symbol('stableIdSymbol');
-type WithSymbolId<T> = T & {
-  [stableIdSymbol]?: number;
 };
 
 export class PageCollector<T> {
@@ -285,20 +276,15 @@ class PageEventSubscriber {
   async subscribe() {
     this.#resetIssueAggregator();
     this.#page.on('framenavigated', this.#onFrameNavigated);
-    this.#session.on('Audits.issueAdded', this.#onIssueAdded);
+    this.#page.on('issue', this.#onIssueAdded);
     this.#session.on('Runtime.exceptionThrown', this.#onExceptionThrown);
-    try {
-      await this.#session.send('Audits.enable');
-    } catch (error) {
-      logger('Error subscribing to issues', error);
-    }
   }
 
   unsubscribe() {
     this.#seenKeys.clear();
     this.#seenIssues.clear();
     this.#page.off('framenavigated', this.#onFrameNavigated);
-    this.#session.off('Audits.issueAdded', this.#onIssueAdded);
+    this.#page.off('issue', this.#onIssueAdded);
     this.#session.off('Runtime.exceptionThrown', this.#onExceptionThrown);
     if (this.#issueAggregator) {
       this.#issueAggregator.removeEventListener(
@@ -306,9 +292,6 @@ class PageEventSubscriber {
         this.#onAggregatedIssue,
       );
     }
-    void this.#session.send('Audits.disable').catch(() => {
-      // might fail.
-    });
   }
 
   #onAggregatedIssue = (
@@ -318,7 +301,7 @@ class PageEventSubscriber {
       return;
     }
     this.#seenIssues.add(event.data);
-    this.#page.emit('issue', event.data);
+    this.#page.emit('devtoolsAggregatedIssue', event.data);
   };
 
   #onExceptionThrown = (event: Protocol.Runtime.ExceptionThrownEvent) => {
@@ -339,9 +322,13 @@ class PageEventSubscriber {
     this.#resetIssueAggregator();
   };
 
-  #onIssueAdded = (data: Protocol.Audits.IssueAddedEvent) => {
+  #onIssueAdded = (inspectorIssue: Issue) => {
     try {
-      const inspectorIssue = data.issue;
+      // DevTools currently defines this protocol issue code but has no
+      // IssuesManager handler for it, so calling into the mapper only warns.
+      if (String(inspectorIssue.code) === 'PerformanceIssue') {
+        return;
+      }
       const issue = DevTools.createIssuesFromProtocolIssue(
         null,
         // @ts-expect-error Protocol types diverge.

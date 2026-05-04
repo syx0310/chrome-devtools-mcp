@@ -17,11 +17,12 @@ import {
   type FlagUsage,
   WatchdogMessageType,
   OsType,
+  type ToolInvocation,
 } from './types.js';
 import {WatchdogClient} from './WatchdogClient.js';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const PARAM_BLOCKLIST = new Set(['uid']);
+export const PARAM_BLOCKLIST = new Set(['uid', 'reqid', 'msgid']);
 
 const SUPPORTED_ZOD_TYPES = [
   'ZodString',
@@ -36,7 +37,7 @@ function isZodType(type: string): type is ZodType {
   return SUPPORTED_ZOD_TYPES.includes(type as ZodType);
 }
 
-function getZodType(zodType: zod.ZodTypeAny): ZodType {
+export function getZodType(zodType: zod.ZodTypeAny): ZodType {
   const def = zodType._def;
   const typeName = def.typeName;
 
@@ -59,13 +60,33 @@ function getZodType(zodType: zod.ZodTypeAny): ZodType {
 
 type LoggedToolCallArgValue = string | number | boolean;
 
-function transformName(zodType: ZodType, name: string): string {
+export function transformArgName(zodType: ZodType, name: string): string {
+  const snakeCaseName = name.replace(
+    /[A-Z]/g,
+    letter => `_${letter.toLowerCase()}`,
+  );
   if (zodType === 'ZodString') {
-    return `${name}_length`;
+    return `${snakeCaseName}_length`;
   } else if (zodType === 'ZodArray') {
-    return `${name}_count`;
+    return `${snakeCaseName}_count`;
   } else {
-    return name;
+    return snakeCaseName;
+  }
+}
+
+export function transformArgType(zodType: ZodType): string {
+  if (zodType === 'ZodString' || zodType === 'ZodArray') {
+    return 'number';
+  }
+  switch (zodType) {
+    case 'ZodNumber':
+      return 'number';
+    case 'ZodBoolean':
+      return 'boolean';
+    case 'ZodEnum':
+      return 'enum';
+    default:
+      throw new Error(`Unsupported zod type for tool parameter: ${zodType}`);
   }
 }
 
@@ -117,7 +138,7 @@ export function sanitizeParams(
         `parameter ${name} has type ${zodType} but value ${value} is not of equivalent type`,
       );
     }
-    const transformedName = transformName(zodType, name);
+    const transformedName = transformArgName(zodType, name);
     const transformedValue = transformValue(zodType, value);
     transformed[transformedName] = transformedValue;
   }
@@ -187,18 +208,27 @@ export class ClearcutLogger {
 
   async logToolInvocation(args: {
     toolName: string;
+    params: ShapeOutput<zod.ZodRawShape>;
+    schema: zod.ZodRawShape;
     success: boolean;
     latencyMs: number;
   }): Promise<void> {
+    const tool_invocation: ToolInvocation = {
+      tool_name: args.toolName,
+      success: args.success,
+      latency_ms: args.latencyMs,
+    };
+    if (Object.keys(args.params).length > 0) {
+      tool_invocation.tool_params = {
+        [`${args.toolName}_params`]: sanitizeParams(args.params, args.schema),
+      };
+    }
+
     this.#watchdog.send({
       type: WatchdogMessageType.LOG_EVENT,
       payload: {
         mcp_client: this.#mcpClient,
-        tool_invocation: {
-          tool_name: args.toolName,
-          success: args.success,
-          latency_ms: args.latencyMs,
-        },
+        tool_invocation: tool_invocation,
       },
     });
   }

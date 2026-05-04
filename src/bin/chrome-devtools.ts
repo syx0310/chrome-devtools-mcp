@@ -21,10 +21,15 @@ import {
 import {isDaemonRunning, serializeArgs} from '../daemon/utils.js';
 import {logDisclaimers} from '../index.js';
 import {hideBin, yargs, type CallToolResult} from '../third_party/index.js';
+import {checkForUpdates} from '../utils/check-for-updates.js';
 import {VERSION} from '../version.js';
 
 import {commands} from './chrome-devtools-cli-options.js';
 import {cliOptions, parseArguments} from './chrome-devtools-mcp-cli-options.js';
+
+await checkForUpdates(
+  'Run `npm install -g chrome-devtools-mcp@latest` and `chrome-devtools start` to update and restart the daemon.',
+);
 
 async function start(args: string[]) {
   const combinedArgs = [...args, ...defaultArgs];
@@ -46,6 +51,7 @@ delete startCliOptions.viewport;
 // tools, they need to be enabled during CLI generation.
 delete startCliOptions.experimentalPageIdRouting;
 delete startCliOptions.experimentalVision;
+delete startCliOptions.experimentalWebmcp;
 delete startCliOptions.experimentalInteropTools;
 delete startCliOptions.experimentalScreencast;
 delete startCliOptions.categoryEmulation;

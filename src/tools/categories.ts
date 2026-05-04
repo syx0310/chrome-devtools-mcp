@@ -13,6 +13,7 @@ export enum ToolCategory {
   DEBUGGING = 'debugging',
   EXTENSIONS = 'extensions',
   IN_PAGE = 'in-page',
+  MEMORY = 'memory',
 }
 
 export const labels = {
@@ -24,4 +25,7 @@ export const labels = {
   [ToolCategory.DEBUGGING]: 'Debugging',
   [ToolCategory.EXTENSIONS]: 'Extensions',
   [ToolCategory.IN_PAGE]: 'In-page tools',
+  [ToolCategory.MEMORY]: 'Memory',
 };
+
+export const OFF_BY_DEFAULT_CATEGORIES = [ToolCategory.EXTENSIONS];

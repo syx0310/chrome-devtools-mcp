@@ -19,7 +19,7 @@ import {
 export const listPages = defineTool(args => {
   return {
     name: 'list_pages',
-    description: `Get a list of pages ${args?.categoryExtensions ? 'including extension service workers' : ''} open in the browser.`,
+    description: `Get a list of pages${args?.categoryExtensions ? ' including extension service workers' : ''} open in the browser.`,
     annotations: {
       category: ToolCategory.NAVIGATION,
       readOnlyHint: true,
@@ -28,6 +28,7 @@ export const listPages = defineTool(args => {
     handler: async (_request, response) => {
       response.setIncludePages(true);
       response.setListInPageTools();
+      response.setListWebMcpTools();
     },
   };
 });
@@ -55,6 +56,7 @@ export const selectPage = defineTool({
     context.selectPage(page);
     response.setIncludePages(true);
     response.setListInPageTools();
+    response.setListWebMcpTools();
     if (request.params.bringToFront) {
       await page.pptrPage.bringToFront();
     }
@@ -119,7 +121,7 @@ export const newPage = defineTool({
       request.params.isolatedContext,
     );
 
-    await context.waitForEventsAfterAction(
+    await page.waitForEventsAfterAction(
       async () => {
         await page.pptrPage.goto(request.params.url, {
           timeout: request.params.timeout,
@@ -166,7 +168,7 @@ export const navigatePage = definePageTool({
       ),
     ...timeoutSchema,
   },
-  handler: async (request, response, context) => {
+  handler: async (request, response) => {
     const page = request.page;
     const options = {
       timeout: request.params.timeout,
@@ -206,7 +208,7 @@ export const navigatePage = definePageTool({
     page.pptrPage.on('dialog', dialogHandler);
 
     try {
-      await context.waitForEventsAfterAction(
+      await page.waitForEventsAfterAction(
         async () => {
           switch (request.params.type) {
             case 'url':
@@ -222,7 +224,7 @@ export const navigatePage = definePageTool({
                 );
               } catch (error) {
                 response.appendResponseLine(
-                  `Unable to navigate in the  selected page: ${error.message}.`,
+                  `Unable to navigate in the selected page: ${error.message}.`,
                 );
               }
               break;
@@ -280,6 +282,7 @@ export const navigatePage = definePageTool({
 
     response.setIncludePages(true);
     response.setListInPageTools();
+    response.setListWebMcpTools();
   },
 });
 

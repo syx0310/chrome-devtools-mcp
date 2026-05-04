@@ -9,6 +9,8 @@ import path from 'node:path';
 
 import type {TargetUniverse} from './DevtoolsUtils.js';
 import {UniverseManager} from './DevtoolsUtils.js';
+import {HeapSnapshotManager} from './HeapSnapshotManager.js';
+import type {AggregatedInfoWithUid} from './HeapSnapshotManager.js';
 import {McpPage} from './McpPage.js';
 import {
   NetworkCollector,
@@ -17,7 +19,6 @@ import {
   type UncaughtError,
 } from './PageCollector.js';
 import {applyAntiDevtoolsDetection, applyStealthToPage} from './stealth.js';
-import type {DevTools} from './third_party/index.js';
 import type {
   Browser,
   BrowserContext,
@@ -29,13 +30,18 @@ import type {
   SerializedAXNode,
   Viewport,
   Target,
+  Extension,
 } from './third_party/index.js';
+import type {DevTools} from './third_party/index.js';
 import {Locator} from './third_party/index.js';
 import {PredefinedNetworkConditions} from './third_party/index.js';
-import type {ToolGroup, ToolDefinition} from './tools/inPage.js';
 import {listPages} from './tools/pages.js';
 import {CLOSE_PAGE_ERROR} from './tools/ToolDefinition.js';
-import type {Context, DevToolsData} from './tools/ToolDefinition.js';
+import type {
+  Context,
+  DevToolsData,
+  SupportedExtensions,
+} from './tools/ToolDefinition.js';
 import type {TraceResult} from './trace-processing/parse.js';
 import type {
   EmulationSettings,
@@ -44,12 +50,8 @@ import type {
   TextSnapshotNode,
   ExtensionServiceWorker,
 } from './types.js';
-import {
-  ExtensionRegistry,
-  type InstalledExtension,
-} from './utils/ExtensionRegistry.js';
-import {saveTemporaryFile} from './utils/files.js';
-import {WaitForHelper} from './WaitForHelper.js';
+import {ensureExtension, saveTemporaryFile} from './utils/files.js';
+import {getNetworkMultiplierFromString} from './WaitForHelper.js';
 
 interface McpContextOptions {
   // Whether the DevTools windows are exposed as pages for debugging of DevTools.
@@ -66,23 +68,6 @@ interface McpContextOptions {
 
 const DEFAULT_TIMEOUT = 5_000;
 const NAVIGATION_TIMEOUT = 10_000;
-
-function getNetworkMultiplierFromString(condition: string | null): number {
-  const puppeteerCondition =
-    condition as keyof typeof PredefinedNetworkConditions;
-
-  switch (puppeteerCondition) {
-    case 'Fast 4G':
-      return 1;
-    case 'Slow 4G':
-      return 2.5;
-    case 'Fast 3G':
-      return 5;
-    case 'Slow 3G':
-      return 10;
-  }
-  return 1;
-}
 
 export class McpContext implements Context {
   browser: Browser;
@@ -101,13 +86,11 @@ export class McpContext implements Context {
   #networkCollector: NetworkCollector;
   #consoleCollector: ConsoleCollector;
   #devtoolsUniverseManager: UniverseManager;
-  #extensionRegistry = new ExtensionRegistry();
 
   #isRunningTrace = false;
   #screenRecorderData: {recorder: ScreenRecorder; filePath: string} | null =
     null;
 
-  #inPageTools?: ToolGroup<ToolDefinition>;
   #nextPageId = 1;
   #extensionPages = new WeakMap<Target, Page>();
 
@@ -119,6 +102,7 @@ export class McpContext implements Context {
 
   #locatorClass: typeof Locator;
   #options: McpContextOptions;
+  #heapSnapshotManager = new HeapSnapshotManager();
 
   private constructor(
     browser: Browser,
@@ -141,7 +125,7 @@ export class McpContext implements Context {
         uncaughtError: event => {
           collect(event);
         },
-        issue: event => {
+        devtoolsAggregatedIssue: event => {
           collect(event);
         },
       } as ListenerMap;
@@ -475,14 +459,6 @@ export class McpContext implements Context {
   selectPage(newPage: McpPage): void {
     this.#selectedPage = newPage;
     this.#updateSelectedPageTimeouts();
-  }
-
-  setInPageTools(toolGroup?: ToolGroup<ToolDefinition>) {
-    this.#inPageTools = toolGroup;
-  }
-
-  getInPageTools(): ToolGroup<ToolDefinition> | undefined {
-    return this.#inPageTools;
   }
 
   #updateSelectedPageTimeouts() {
@@ -839,10 +815,14 @@ export class McpContext implements Context {
   }
   async saveFile(
     data: Uint8Array<ArrayBufferLike>,
-    filename: string,
+    clientProvidedFilePath: string,
+    extension: SupportedExtensions,
   ): Promise<{filename: string}> {
     try {
-      const filePath = path.resolve(filename);
+      const filePath = ensureExtension(
+        path.resolve(clientProvidedFilePath),
+        extension,
+      );
       await fs.mkdir(path.dirname(filePath), {recursive: true});
       await fs.writeFile(filePath, data);
       return {filename: filePath};
@@ -860,31 +840,6 @@ export class McpContext implements Context {
 
   recordedTraces(): TraceResult[] {
     return this.#traceResults;
-  }
-
-  getWaitForHelper(
-    page: Page,
-    cpuMultiplier: number,
-    networkMultiplier: number,
-  ) {
-    return new WaitForHelper(page, cpuMultiplier, networkMultiplier);
-  }
-
-  waitForEventsAfterAction(
-    action: () => Promise<unknown>,
-    options?: {timeout?: number},
-  ): Promise<void> {
-    const page = this.#getSelectedMcpPage();
-    const cpuMultiplier = page.cpuThrottlingRate;
-    const networkMultiplier = getNetworkMultiplierFromString(
-      page.networkConditions,
-    );
-    const waitForHelper = this.getWaitForHelper(
-      page.pptrPage,
-      cpuMultiplier,
-      networkMultiplier,
-    );
-    return waitForHelper.waitForEventsAfterAction(action, options);
   }
 
   getNetworkRequestStableId(request: HTTPRequest): number {
@@ -935,37 +890,47 @@ export class McpContext implements Context {
 
   async installExtension(extensionPath: string): Promise<string> {
     const id = await this.browser.installExtension(extensionPath);
-    await this.#extensionRegistry.registerExtension(id, extensionPath);
     return id;
   }
 
   async uninstallExtension(id: string): Promise<void> {
     await this.browser.uninstallExtension(id);
-    this.#extensionRegistry.remove(id);
   }
 
   async triggerExtensionAction(id: string): Promise<void> {
-    const page = this.getSelectedPptrPage();
-    // @ts-expect-error internal puppeteer api is needed since we don't have a way to get
-    // a tab id at the moment
-    const theTarget = page._tabId;
-    const session = await this.browser.target().createCDPSession();
-
-    try {
-      await session.send('Extensions.triggerAction', {
-        id,
-        targetId: theTarget,
-      });
-    } finally {
-      await session.detach();
+    const extensions = await this.browser.extensions();
+    const extension = extensions.get(id);
+    if (!extension) {
+      throw new Error(`Extension with ID ${id} not found.`);
     }
+    const page = this.getSelectedPptrPage();
+    await extension.triggerAction(page);
   }
 
-  listExtensions(): InstalledExtension[] {
-    return this.#extensionRegistry.list();
+  listExtensions(): Promise<Map<string, Extension>> {
+    return this.browser.extensions();
   }
 
-  getExtension(id: string): InstalledExtension | undefined {
-    return this.#extensionRegistry.getById(id);
+  async getExtension(id: string): Promise<Extension | undefined> {
+    const pptrExtensions = await this.browser.extensions();
+    return pptrExtensions.get(id);
+  }
+
+  async getHeapSnapshotAggregates(
+    filePath: string,
+  ): Promise<Record<string, AggregatedInfoWithUid>> {
+    return await this.#heapSnapshotManager.getAggregates(filePath);
+  }
+
+  async getHeapSnapshotStats(
+    filePath: string,
+  ): Promise<DevTools.HeapSnapshotModel.HeapSnapshotModel.Statistics> {
+    return await this.#heapSnapshotManager.getStats(filePath);
+  }
+
+  async getHeapSnapshotStaticData(
+    filePath: string,
+  ): Promise<DevTools.HeapSnapshotModel.HeapSnapshotModel.StaticData | null> {
+    return await this.#heapSnapshotManager.getStaticData(filePath);
   }
 }

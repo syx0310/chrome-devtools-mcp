@@ -75,13 +75,13 @@ describe('McpContext', () => {
         cpuThrottlingRate: 2,
         networkConditions: 'Slow 3G',
       });
-      const stub = sinon.spy(context, 'getWaitForHelper');
+      const stub = sinon.spy(page, 'createWaitForHelper');
 
-      await context.waitForEventsAfterAction(async () => {
+      await page.waitForEventsAfterAction(async () => {
         // trigger the waiting only
       });
 
-      sinon.assert.calledWithExactly(stub, page.pptrPage, 2, 10);
+      sinon.assert.calledWithExactly(stub, 2, 10);
     });
   });
 
@@ -89,10 +89,6 @@ describe('McpContext', () => {
     await withMcpContext(
       async (_response, context) => {
         const page = await context.newPage();
-        // TODO: we do not know when the CLI flag to auto open DevTools will run
-        // so we need this until
-        // https://github.com/puppeteer/puppeteer/issues/14368 is there.
-        await new Promise(resolve => setTimeout(resolve, 5000));
         await context.createPagesSnapshot();
         assert.ok(context.getDevToolsPage(page.pptrPage));
       },

@@ -17,6 +17,8 @@ describe('cli args parsing', () => {
     categoryPerformance: true,
     'category-network': true,
     categoryNetwork: true,
+    'category-extensions': false,
+    categoryExtensions: false,
     'auto-connect': undefined,
     autoConnect: undefined,
     'performance-crux': true,
@@ -26,6 +28,8 @@ describe('cli args parsing', () => {
     stealth: true,
     'anti-devtools-detection': true,
     antiDevtoolsDetection: true,
+    'redact-network-headers': false,
+    redactNetworkHeaders: false,
   };
 
   it('parses with default args', async () => {

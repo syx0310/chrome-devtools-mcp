@@ -20,6 +20,7 @@ describe('inPage', () => {
       await withMcpContext(
         async (response, context) => {
           const page = await context.newPage();
+          response.setPage(page);
 
           await page.pptrPage.evaluate(() => {
             window.__dtmcp = {
@@ -76,6 +77,7 @@ describe('inPage', () => {
       await withMcpContext(
         async (response, context) => {
           const page = await context.newPage();
+          response.setPage(page);
           await page.pptrPage.evaluate(() => {
             window.addEventListener('devtoolstooldiscovery', (e: Event) => {
               // @ts-expect-error Event has `respondWith`
@@ -105,6 +107,7 @@ describe('inPage', () => {
       await withMcpContext(
         async (response, context) => {
           const page = await context.newPage();
+          response.setPage(page);
           await page.pptrPage.evaluate(() => {
             window.addEventListener('devtoolstooldiscovery', () => {
               // do nothing
@@ -133,6 +136,7 @@ describe('inPage', () => {
       await withMcpContext(
         async (response, context) => {
           const page = await context.newPage();
+          response.setPage(page);
           await listInPageTools.handler({params: {}, page}, response, context);
 
           const result = await response.handle('list_in_page_tools', context);
@@ -155,6 +159,7 @@ describe('inPage', () => {
       evaluateFn: () => void,
     ) {
       const page = await context.newPage();
+      response.setPage(page);
       await page.pptrPage.evaluate(evaluateFn);
       await listInPageTools.handler({params: {}, page}, response, context);
       await response.handle('list_in_page_tools', context);
@@ -341,6 +346,99 @@ describe('inPage', () => {
         undefined,
         {categoryInPageTools: true} as ParsedArguments,
       );
+    });
+
+    it('replaces uid with element handle in params', async () => {
+      await withMcpContext(async (response, context) => {
+        const page = await context.newPage();
+        response.setPage(page);
+
+        page.inPageTools = {
+          name: 'test-group',
+          description: 'test description',
+          tools: [
+            {
+              name: 'test-tool',
+              description: 'test tool description',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  element: {type: 'object'},
+                },
+                required: ['element'],
+              },
+            },
+          ],
+        };
+
+        await page.pptrPage.evaluate(() => {
+          window.__dtmcp = {
+            executeTool: async (
+              _name: string,
+              args: Record<string, unknown>,
+            ) => {
+              const el = args.element;
+              if (el instanceof HTMLElement) {
+                return {
+                  isElement: true,
+                  tagName: el.tagName,
+                  id: el.id,
+                };
+              }
+              return {
+                isElement: false,
+                tagName: '',
+                id: '',
+              };
+            },
+          };
+        });
+
+        await page.pptrPage.evaluate(() => {
+          const div = document.createElement('div');
+          div.id = 'test-id';
+          document.body.appendChild(div);
+        });
+
+        const handle = await page.pptrPage.$('#test-id');
+        if (!handle) {
+          throw new Error('Handle not found');
+        }
+
+        page.getElementByUid = async (uid: string) => {
+          if (uid === 'some-uid') {
+            return handle;
+          }
+          throw new Error('Not found');
+        };
+
+        await executeInPageTool.handler(
+          {
+            params: {
+              toolName: 'test-tool',
+              params: JSON.stringify({element: {uid: 'some-uid'}}),
+            },
+            page: page,
+          },
+          response,
+          context,
+        );
+
+        assert.strictEqual(
+          response.responseLines[0],
+          JSON.stringify(
+            {
+              result: {
+                isElement: true,
+                tagName: 'DIV',
+                id: 'test-id',
+              },
+            },
+            null,
+            2,
+          ),
+        );
+      });
     });
   });
 });

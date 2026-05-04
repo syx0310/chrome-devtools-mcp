@@ -18,14 +18,22 @@ import type {
   HTTPResponse,
   LaunchOptions,
   Page,
+  Target,
 } from 'puppeteer-core';
 import sinon from 'sinon';
 
 import type {ParsedArguments} from '../src/bin/chrome-devtools-mcp-cli-options.js';
 import {McpContext} from '../src/McpContext.js';
 import {McpResponse} from '../src/McpResponse.js';
-import {stableIdSymbol} from '../src/PageCollector.js';
 import {DevTools} from '../src/third_party/index.js';
+import {stableIdSymbol} from '../src/utils/id.js';
+
+export function assertNoServiceWorkerReported(targets: Target[], id: string) {
+  const target = targets.find(target => {
+    return target.url().includes(id) && target.type() === 'service_worker';
+  });
+  assert(target === undefined);
+}
 
 export function getTextContent(
   content: CallToolResult['content'][number],
@@ -64,6 +72,7 @@ export async function withBrowser(
     debug?: boolean;
     autoOpenDevTools?: boolean;
     executablePath?: string;
+    args?: string[];
   } = {},
 ) {
   const launchOptions: LaunchOptions = {
@@ -74,7 +83,7 @@ export async function withBrowser(
     devtools: options.autoOpenDevTools ?? false,
     pipe: true,
     handleDevToolsAsPage: true,
-    args: ['--screen-info={3840x2160}'],
+    args: [...(options.args || []), '--screen-info={3840x2160}'],
     enableExtensions: true,
   };
   const key = JSON.stringify(launchOptions);
@@ -104,6 +113,7 @@ export async function withMcpContext(
     autoOpenDevTools?: boolean;
     performanceCrux?: boolean;
     executablePath?: string;
+    args?: string[];
   } = {},
   args: ParsedArguments = {} as ParsedArguments,
 ) {
@@ -142,6 +152,7 @@ export function getMockRequest(
     navigationRequest?: boolean;
     frame?: Frame;
     redirectChain?: HTTPRequest[];
+    headers?: Record<string, string>;
   } = {},
 ): HTTPRequest {
   return {
@@ -170,9 +181,11 @@ export function getMockRequest(
       return options.resourceType ?? 'document';
     },
     headers(): Record<string, string> {
-      return {
-        'content-size': '10',
-      };
+      return (
+        options.headers ?? {
+          'content-size': '10',
+        }
+      );
     },
     redirectChain(): HTTPRequest[] {
       return options.redirectChain ?? [];
@@ -190,6 +203,7 @@ export function getMockRequest(
 export function getMockResponse(
   options: {
     status?: number;
+    headers?: Record<string, string>;
   } = {},
 ): HTTPResponse {
   return {
@@ -197,9 +211,9 @@ export function getMockResponse(
       return options.status ?? 200;
     },
     headers(): Record<string, string> {
-      return {};
+      return options.headers ?? {};
     },
-  } as HTTPResponse;
+  } as unknown as HTTPResponse;
 }
 
 export function html(

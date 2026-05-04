@@ -140,7 +140,7 @@ export async function createMcpServer(
     }
     if (
       tool.annotations.category === ToolCategory.EXTENSIONS &&
-      !serverArgs.categoryExtensions
+      serverArgs.categoryExtensions === false
     ) {
       return;
     }
@@ -157,6 +157,12 @@ export async function createMcpServer(
       return;
     }
     if (
+      tool.annotations.conditions?.includes('experimentalMemory') &&
+      !serverArgs.experimentalMemory
+    ) {
+      return;
+    }
+    if (
       tool.annotations.conditions?.includes('experimentalInteropTools') &&
       !serverArgs.experimentalInteropTools
     ) {
@@ -165,6 +171,12 @@ export async function createMcpServer(
     if (
       tool.annotations.conditions?.includes('screencast') &&
       !serverArgs.experimentalScreencast
+    ) {
+      return;
+    }
+    if (
+      tool.annotations.conditions?.includes('experimentalWebmcp') &&
+      !serverArgs.experimentalWebmcp
     ) {
       return;
     }
@@ -195,6 +207,8 @@ export async function createMcpServer(
           const response = serverArgs.slim
             ? new SlimMcpResponse(serverArgs)
             : new McpResponse(serverArgs);
+
+          response.setRedactNetworkHeaders(serverArgs.redactNetworkHeaders);
           if ('pageScoped' in tool && tool.pageScoped) {
             const page =
               serverArgs.experimentalPageIdRouting &&
@@ -256,6 +270,8 @@ export async function createMcpServer(
         } finally {
           void clearcutLogger?.logToolInvocation({
             toolName: tool.name,
+            params,
+            schema,
             success,
             latencyMs: bucketizeLatency(Date.now() - startTime),
           });
