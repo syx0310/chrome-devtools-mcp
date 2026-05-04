@@ -180,6 +180,11 @@ export const cliOptions = {
       'Whether to include all kinds of pages such as webviews or background pages as pages.',
     hidden: true,
   },
+  experimentalNavigationAllowlist: {
+    type: 'boolean',
+    describe: 'Whether to enable navigation allowlist tool parameter.',
+    hidden: true,
+  },
   experimentalInteropTools: {
     type: 'boolean',
     describe: 'Whether to enable interoperability tools',
@@ -201,6 +206,11 @@ export const cliOptions = {
     default: true,
     describe:
       'Blocks DevTools detection scripts (timer interception, window dimension fixes, console getter prevention). Enabled by default. Use --no-anti-devtools-detection to disable.',
+  },
+  experimentalFfmpegPath: {
+    type: 'string',
+    describe: 'Path to ffmpeg executable for screencast recording.',
+    implies: 'experimentalScreencast',
   },
   experimentalWebmcp: {
     type: 'boolean',
