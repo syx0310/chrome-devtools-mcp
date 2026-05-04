@@ -145,6 +145,12 @@ export async function createMcpServer(
       return;
     }
     if (
+      tool.annotations.category === ToolCategory.IN_PAGE &&
+      !serverArgs.categoryInPageTools
+    ) {
+      return;
+    }
+    if (
       tool.annotations.conditions?.includes('computerVision') &&
       !serverArgs.experimentalVision
     ) {
