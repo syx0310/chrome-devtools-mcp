@@ -39,6 +39,27 @@ DevTools.I18n.DevToolsLocale.DevToolsLocale.instance({
 });
 DevTools.I18n.i18n.registerLocaleDataForTest('en-US', {});
 
+if (!('window' in globalThis)) {
+  Object.defineProperty(globalThis, 'window', {
+    value: new EventTarget(),
+    configurable: true,
+  });
+}
+
+if (!('CustomEvent' in globalThis)) {
+  Object.defineProperty(globalThis, 'CustomEvent', {
+    value: class CustomEvent<T = unknown> extends Event {
+      readonly detail: T;
+
+      constructor(type: string, eventInitDict?: CustomEventInit<T>) {
+        super(type, eventInitDict);
+        this.detail = eventInitDict?.detail as T;
+      }
+    },
+    configurable: true,
+  });
+}
+
 DevTools.Formatter.FormatterWorkerPool.FormatterWorkerPool.instance({
   forceNew: true,
   entrypointURL: import.meta
@@ -154,6 +175,12 @@ const DEFAULT_FACTORY: TargetUniverseFactoryFn = async (page: Page) => {
     undefined,
     connection,
   );
+  const debuggerModel = target.model(DevTools.DebuggerModel);
+  if (debuggerModel) {
+    await debuggerModel.agent
+      .invoke_setSkipAllPauses({skip: true})
+      .catch(() => undefined);
+  }
   return {target, universe};
 };
 
@@ -165,6 +192,14 @@ const DEFAULT_FACTORY: TargetUniverseFactoryFn = async (page: Page) => {
 const SKIP_ALL_PAUSES = {
   modelAdded(model: DevTools.DebuggerModel): void {
     void model.agent.invoke_setSkipAllPauses({skip: true});
+    model.addEventListener(
+      'DebuggerPaused' as Parameters<
+        DevTools.DebuggerModel['addEventListener']
+      >[0],
+      () => {
+        void model.agent.invoke_resume({});
+      },
+    );
   },
 
   modelRemoved(): void {

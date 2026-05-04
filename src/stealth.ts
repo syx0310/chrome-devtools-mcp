@@ -229,6 +229,16 @@ export const STEALTH_INIT_SCRIPT = `
   // On desktop, 0 is correct; just ensure it's not flagged as automation artifact.
 
   // 12. Patch Error stack traces to remove puppeteer/CDP references
+  const sanitizeStackString = (stack) => {
+    if (typeof stack !== 'string') {
+      return stack;
+    }
+    return stack
+      .split('\\n')
+      .filter(line => !/pptr:|__puppeteer|puppeteer/i.test(line))
+      .join('\\n');
+  };
+
   const originalPrepareStackTrace = Error.prepareStackTrace;
   Error.prepareStackTrace = function (error, stack) {
     const filtered = stack.filter(frame => {
@@ -238,14 +248,44 @@ export const STEALTH_INIT_SCRIPT = `
     if (originalPrepareStackTrace) {
       return originalPrepareStackTrace(error, filtered);
     }
-    return error.name + ': ' + error.message + '\\n' + filtered.map(f => '    at ' + f.toString()).join('\\n');
+    return sanitizeStackString(error.name + ': ' + error.message + '\\n' + filtered.map(f => '    at ' + f.toString()).join('\\n'));
   };
+
+  const NativeError = Error;
+  const sanitizeErrorInstance = (error) => {
+    try {
+      const stack = error?.stack;
+      if (typeof stack === 'string') {
+        Object.defineProperty(error, 'stack', {
+          value: sanitizeStackString(stack),
+          writable: true,
+          configurable: true,
+        });
+      }
+    } catch (_e) { /* ignore */ }
+    return error;
+  };
+
+  const ErrorProxy = new Proxy(NativeError, {
+    apply: (target, thisArg, args) => {
+      return sanitizeErrorInstance(Reflect.apply(target, thisArg, args));
+    },
+    construct: (target, args, newTarget) => {
+      return sanitizeErrorInstance(Reflect.construct(target, args, newTarget));
+    },
+  });
+  patchedFns.add(ErrorProxy);
+  Object.defineProperty(window, 'Error', {
+    value: ErrorProxy,
+    writable: true,
+    configurable: true,
+  });
 })();
 `;
 
 /**
  * Apply CDP-level stealth patches to a single page:
- * - Skip all debugger pauses (anti-debugging traps)
+ * - Best-effort skip-all-pauses without enabling the Debugger domain
  * - Strip "HeadlessChrome" from User-Agent
  * - Remove cdc_ properties injected by CDP
  */
@@ -254,9 +294,11 @@ async function applyCdpStealth(page: Page): Promise<void> {
     // @ts-expect-error _client() is internal Puppeteer API
     const client = page._client();
 
-    // Skip debugger; statement traps used for anti-debugging
-    await client.send('Debugger.enable');
-    await client.send('Debugger.setSkipAllPauses', {skip: true});
+    // Do not call Debugger.enable here. Enabling the domain from the MCP
+    // session makes this session a pause target for `debugger;` statements.
+    await client
+      .send('Debugger.setSkipAllPauses', {skip: true})
+      .catch(() => undefined);
 
     // Strip HeadlessChrome from User-Agent
     const {userAgent: currentUA} = (await client.send(
@@ -414,6 +456,43 @@ export const ANTI_DEVTOOLS_INIT_SCRIPT = `
   // fire only when DevTools renders the console output.
   // Fix: defer actual console output to next task via setTimeout(0) so timing
   // measurement returns ~0ms, and sanitize arguments to strip getters/toString.
+  function safeCloneForConsole(value, depth = 0, seen = new WeakSet()) {
+    if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+      return value;
+    }
+    if (typeof value === 'function') {
+      return 'function ' + (value.name || '') + '() { [native code] }';
+    }
+    if (seen.has(value)) {
+      return '[Circular]';
+    }
+    if (depth >= 3) {
+      return Object.prototype.toString.call(value);
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      const arr = [];
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      for (let i = 0; i < value.length; i++) {
+        const desc = descriptors[i];
+        arr[i] = desc && 'value' in desc ? safeCloneForConsole(desc.value, depth + 1, seen) : '[Getter]';
+      }
+      return arr;
+    }
+
+    const clone = Object.create(null);
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key === 'symbol') {
+        continue;
+      }
+      const desc = descriptors[key];
+      clone[key] = desc && 'value' in desc ? safeCloneForConsole(desc.value, depth + 1, seen) : '[Getter]';
+    }
+    return clone;
+  }
+
   const consoleMethodsToWrap = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'table', 'clear'];
   for (const method of consoleMethodsToWrap) {
     const orig = console[method].bind(console);
@@ -423,28 +502,19 @@ export const ANTI_DEVTOOLS_INIT_SCRIPT = `
           orig(...args);
           return;
         }
-        const safeArgs = args.map(arg => {
-          if (typeof arg === 'function') {
-            return String(arg);
-          }
-          if (arg !== null && typeof arg === 'object') {
-            try { return JSON.parse(JSON.stringify(arg)); }
-            catch (_e) {
-              try { return structuredClone(arg); }
-              catch (_e2) { return String(arg); }
-            }
-          }
-          return arg;
-        });
+        const safeArgs = args.map(arg => safeCloneForConsole(arg));
         orig(...safeArgs);
       }, 0);
     };
+    try {
+      Object.defineProperty(wrapped, 'name', { value: method, configurable: true });
+    } catch (_e) { /* ignore */ }
     patchedFns.add(wrapped);
     console[method] = wrapped;
   }
 
   // 4. document.hasFocus() — always return true
-  document.hasFocus = function() { return true; };
+  document.hasFocus = function hasFocus() { return true; };
   patchedFns.add(document.hasFocus);
 
   // 5. Notification.permission — fix 'denied' in automated mode
@@ -501,6 +571,43 @@ const ANTI_DEVTOOLS_IMMEDIATE_SCRIPT = `
   // helps for any new detection code and for sites that read console
   // methods lazily rather than caching them at init time).
   const _origSetTimeout = setTimeout;
+  function safeCloneForConsole(value, depth = 0, seen = new WeakSet()) {
+    if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+      return value;
+    }
+    if (typeof value === 'function') {
+      return 'function ' + (value.name || '') + '() { [native code] }';
+    }
+    if (seen.has(value)) {
+      return '[Circular]';
+    }
+    if (depth >= 3) {
+      return Object.prototype.toString.call(value);
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      const arr = [];
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      for (let i = 0; i < value.length; i++) {
+        const desc = descriptors[i];
+        arr[i] = desc && 'value' in desc ? safeCloneForConsole(desc.value, depth + 1, seen) : '[Getter]';
+      }
+      return arr;
+    }
+
+    const clone = Object.create(null);
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key === 'symbol') {
+        continue;
+      }
+      const desc = descriptors[key];
+      clone[key] = desc && 'value' in desc ? safeCloneForConsole(desc.value, depth + 1, seen) : '[Getter]';
+    }
+    return clone;
+  }
+
   const consoleMethodsToWrap = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'table', 'clear'];
   for (const method of consoleMethodsToWrap) {
     const orig = console[method].bind(console);
@@ -510,23 +617,17 @@ const ANTI_DEVTOOLS_IMMEDIATE_SCRIPT = `
           orig(...args);
           return;
         }
-        const safeArgs = args.map(arg => {
-          if (typeof arg === 'function') {
-            return String(arg);
-          }
-          if (arg !== null && typeof arg === 'object') {
-            try { return JSON.parse(JSON.stringify(arg)); }
-            catch { try { return structuredClone(arg); } catch { return String(arg); } }
-          }
-          return arg;
-        });
+        const safeArgs = args.map(arg => safeCloneForConsole(arg));
         orig(...safeArgs);
       }, 0);
     };
+    try {
+      Object.defineProperty(console[method], 'name', { value: method, configurable: true });
+    } catch (_e) { /* ignore */ }
   }
 
   // 4. document.hasFocus
-  document.hasFocus = function() { return true; };
+  document.hasFocus = function hasFocus() { return true; };
 
   // 5. Reduce performance.now() precision
   const origPerfNow = performance.now.bind(performance);
@@ -547,7 +648,7 @@ const ANTI_DEVTOOLS_IMMEDIATE_SCRIPT = `
 
 /**
  * Apply CDP-level anti-detection patches:
- * - Skip all debugger pauses to defeat debugger-timing detection
+ * - Best-effort skip-all-pauses without enabling the Debugger domain
  *   (the debuggerChecker in devtools-detector uses
  *   Function('debugger')() and measures if >100ms elapsed).
  */
@@ -555,8 +656,10 @@ async function applyCdpAntiDetection(page: Page): Promise<void> {
   try {
     // @ts-expect-error _client() is internal Puppeteer API
     const client = page._client();
-    await client.send('Debugger.enable');
-    await client.send('Debugger.setSkipAllPauses', {skip: true});
+    // Do not enable Debugger here; that would make MCP itself trigger pauses.
+    await client
+      .send('Debugger.setSkipAllPauses', {skip: true})
+      .catch(() => undefined);
   } catch {
     // Some targets (e.g. service workers) may not support Debugger domain.
   }
@@ -622,17 +725,26 @@ export async function applyAntiDevtoolsDetectionToBrowser(
         } catch {
           // Non-page targets (service workers, etc.) don't support Page domain.
         }
-        try {
-          await session.send('Debugger.enable');
-          await session.send('Debugger.setSkipAllPauses', {skip: true});
-        } catch {
-          // Some targets may not support Debugger domain.
-        }
+        // Do not enable Debugger here; that would make this auto-attach
+        // session itself observable through `debugger;` pauses.
+        await session
+          .send('Debugger.setSkipAllPauses', {skip: true})
+          .catch(() => undefined);
         // Resume the target — it won't start until all auto-attach sessions release.
         try {
           await session.send('Runtime.runIfWaitingForDebugger');
         } catch {
           // Ignore if the target has already closed.
+        }
+        try {
+          if (
+            childSession &&
+            typeof (childSession as {detach?: unknown}).detach === 'function'
+          ) {
+            await (childSession as {detach: () => Promise<void>}).detach();
+          }
+        } catch {
+          // If detach fails, the target may already be gone.
         }
       },
     );
