@@ -4,8 +4,218 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Browser, Page} from './third_party/index.js';
+import type {Browser, CDPSession, Page} from './third_party/index.js';
 import {CDPSessionEvent} from './third_party/index.js';
+
+const STEALTH_WORKER_INIT_SCRIPT = `
+(() => {
+  const globalScope = globalThis;
+  const config = globalScope.__stealthWorkerConfig || {};
+
+  const originalToString = Function.prototype.toString;
+  const patchedFns = new Set();
+  const nativeToString = function toString() {
+    if (patchedFns.has(this)) {
+      return 'function ' + (this.name || '') + '() { [native code] }';
+    }
+    return originalToString.call(this);
+  };
+  patchedFns.add(nativeToString);
+  Function.prototype.toString = nativeToString;
+
+  const defineNativeGetter = (proto, property, value) => {
+    if (!proto) {
+      return;
+    }
+    const desc = Object.getOwnPropertyDescriptor(proto, property);
+    const getter = desc && desc.get;
+    if (typeof getter === 'function') {
+      const wrapped = new Proxy(getter, {
+        apply: (target, thisArg, args) => {
+          Reflect.apply(target, thisArg, args);
+          return value;
+        }
+      });
+      patchedFns.add(wrapped);
+      Object.defineProperty(proto, property, {
+        set: undefined,
+        enumerable: desc.enumerable,
+        configurable: desc.configurable,
+        get: wrapped,
+      });
+      return;
+    }
+    const fallbackGetter = function () { return value; };
+    patchedFns.add(fallbackGetter);
+    Object.defineProperty(proto, property, {
+      set: undefined,
+      enumerable: true,
+      configurable: true,
+      get: fallbackGetter,
+    });
+  };
+
+  const fallbackWebGLProfile = () => {
+    const platform = typeof navigator !== 'undefined' ? navigator.platform || '' : '';
+    if (/Mac|iPhone|iPad|iPod/i.test(platform)) {
+      return {
+        vendor: 'Google Inc. (Apple)',
+        renderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)',
+      };
+    }
+    return {
+      vendor: 'Intel Inc.',
+      renderer: 'Intel Iris OpenGL Engine',
+    };
+  };
+
+  const sanitizeWebGLValue = (nativeValue, nativeRenderer, key) => {
+    const fallback = fallbackWebGLProfile();
+    const nativeString = typeof nativeValue === 'string' ? nativeValue : '';
+    const rendererString = typeof nativeRenderer === 'string' ? nativeRenderer : nativeString;
+    if (!nativeString || /SwiftShader|llvmpipe|Software Rasterizer/i.test(rendererString)) {
+      return fallback[key];
+    }
+    return nativeString;
+  };
+
+  const patchWebGLContext = proto => {
+    if (!proto || typeof proto.getParameter !== 'function') {
+      return;
+    }
+    const originalGetParameter = proto.getParameter;
+    if (patchedFns.has(originalGetParameter)) {
+      return;
+    }
+    const wrappedGetParameter = function getParameter(param) {
+      if (param === 0x9245 || param === 0x9246) {
+        let nativeVendor = '';
+        let nativeRenderer = '';
+        try {
+          nativeVendor = originalGetParameter.call(this, 0x9245);
+          nativeRenderer = originalGetParameter.call(this, 0x9246);
+        } catch (_e) { /* ignore */ }
+        if (param === 0x9245) {
+          return sanitizeWebGLValue(nativeVendor, nativeRenderer, 'vendor');
+        }
+        return sanitizeWebGLValue(nativeRenderer, nativeRenderer, 'renderer');
+      }
+      return originalGetParameter.call(this, param);
+    };
+    patchedFns.add(wrappedGetParameter);
+    proto.getParameter = wrappedGetParameter;
+  };
+
+  const patchConsole = () => {
+    if (!globalScope.console) {
+      return;
+    }
+    const originalSetTimeout = globalScope.setTimeout || (fn => fn());
+    const safeCloneForConsole = (value, depth = 0, seen = new WeakSet()) => {
+      if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+        return value;
+      }
+      const tag = Object.prototype.toString.call(value);
+      if (tag === '[object Error]' || value instanceof Error) {
+        return {
+          name: value.name,
+          message: value.message,
+        };
+      }
+      if (typeof value === 'function') {
+        return 'function ' + (value.name || '') + '() { [native code] }';
+      }
+      if (seen.has(value)) {
+        return '[Circular]';
+      }
+      if (depth >= 3) {
+        return tag;
+      }
+      seen.add(value);
+      if (Array.isArray(value)) {
+        const arr = [];
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        for (let i = 0; i < value.length; i++) {
+          const desc = descriptors[i];
+          arr[i] = desc && 'value' in desc ? safeCloneForConsole(desc.value, depth + 1, seen) : '[Getter]';
+        }
+        return arr;
+      }
+      const clone = Object.create(null);
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      for (const key of Reflect.ownKeys(descriptors)) {
+        if (typeof key === 'symbol') {
+          continue;
+        }
+        const desc = descriptors[key];
+        clone[key] = desc && 'value' in desc ? safeCloneForConsole(desc.value, depth + 1, seen) : '[Getter]';
+      }
+      return clone;
+    };
+    for (const method of ['log', 'info', 'warn', 'error', 'debug', 'dir', 'table', 'clear']) {
+      const originalMethod = globalScope.console[method];
+      if (typeof originalMethod !== 'function') {
+        continue;
+      }
+      const wrapped = function(...args) {
+        originalSetTimeout.call(globalScope, () => {
+          if (method === 'clear' || args.length === 0) {
+            originalMethod.apply(globalScope.console, args);
+            return;
+          }
+          originalMethod.apply(globalScope.console, args.map(arg => safeCloneForConsole(arg)));
+        }, 0);
+      };
+      try {
+        Object.defineProperty(wrapped, 'name', { value: method, configurable: true });
+      } catch (_e) { /* ignore */ }
+      patchedFns.add(wrapped);
+      globalScope.console[method] = wrapped;
+    }
+  };
+
+  try {
+    if (typeof navigator !== 'undefined') {
+      const navProto = Object.getPrototypeOf(navigator);
+      defineNativeGetter(navProto, 'webdriver', false);
+      if (typeof config.userAgent === 'string') {
+        defineNativeGetter(navProto, 'userAgent', config.userAgent);
+      }
+      if (typeof config.platform === 'string') {
+        defineNativeGetter(navProto, 'platform', config.platform);
+      }
+      if (typeof config.language === 'string') {
+        defineNativeGetter(navProto, 'language', config.language);
+      }
+      if (Array.isArray(config.languages)) {
+        defineNativeGetter(navProto, 'languages', Object.freeze(config.languages.slice()));
+      }
+      if (typeof config.hardwareConcurrency === 'number') {
+        defineNativeGetter(navProto, 'hardwareConcurrency', config.hardwareConcurrency);
+      }
+      if (typeof config.deviceMemory === 'number') {
+        defineNativeGetter(navProto, 'deviceMemory', config.deviceMemory);
+      }
+    }
+  } catch (_e) { /* ignore */ }
+
+  try {
+    patchWebGLContext(globalScope.WebGLRenderingContext && globalScope.WebGLRenderingContext.prototype);
+    patchWebGLContext(globalScope.WebGL2RenderingContext && globalScope.WebGL2RenderingContext.prototype);
+  } catch (_e) { /* ignore */ }
+
+  patchConsole();
+})();
+`;
+
+const STEALTH_WORKER_AUTO_ATTACH_SCRIPT = `
+(() => {
+  if (typeof WorkerGlobalScope === 'undefined' || !(globalThis instanceof WorkerGlobalScope)) {
+    return;
+  }
+  ${STEALTH_WORKER_INIT_SCRIPT}
+})();
+`;
 
 /**
  * JavaScript code injected via evaluateOnNewDocument to hide
@@ -13,25 +223,32 @@ import {CDPSessionEvent} from './third_party/index.js';
  */
 export const STEALTH_INIT_SCRIPT = `
 (() => {
-  // 1. navigator.webdriver → false (like real non-automated Chrome)
-  // Must patch Navigator.prototype (not navigator instance) because
-  // anti-detection checks can bypass instance-level patches via:
-  //   Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver').get.apply(navigator)
+  // 1. navigator.webdriver -> false only when Chrome still exposes true.
+  // If --disable-blink-features=AutomationControlled already makes the native
+  // getter return false, keep the native descriptor untouched to avoid
+  // prototype-lie detectors.
   const __wdDesc = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
-  if (__wdDesc && __wdDesc.get) {
+  let __shouldPatchWebdriver = false;
+  try {
+    __shouldPatchWebdriver = navigator.webdriver !== false;
+  } catch (_e) {
+    __shouldPatchWebdriver = true;
+  }
+  if (__shouldPatchWebdriver && __wdDesc && __wdDesc.get) {
     const __origWdGetter = __wdDesc.get;
-    Object.defineProperty(Navigator.prototype, 'webdriver', {
-      set: undefined,
-      enumerable: true,
-      configurable: true,
-      get: new Proxy(__origWdGetter, {
+    const __wdGetter = new Proxy(__origWdGetter, {
         apply: (target, thisArg, args) => {
           // Call original to validate 'this' binding (throws TypeError for
           // wrong type, matching native behavior)
           Reflect.apply(target, thisArg, args);
           return false;
         }
-      })
+    });
+    Object.defineProperty(Navigator.prototype, 'webdriver', {
+      set: undefined,
+      enumerable: __wdDesc.enumerable,
+      configurable: __wdDesc.configurable,
+      get: __wdGetter,
     });
   }
 
@@ -169,21 +386,55 @@ export const STEALTH_INIT_SCRIPT = `
     });
   }
 
-  // 7. WebGL vendor/renderer spoofing — hide SwiftShader (headless fingerprint)
-  const getParameterProto = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function (param) {
-    // UNMASKED_VENDOR_WEBGL
-    if (param === 0x9245) return 'Intel Inc.';
-    // UNMASKED_RENDERER_WEBGL
-    if (param === 0x9246) return 'Intel Iris OpenGL Engine';
-    return getParameterProto.call(this, param);
+  // 7. WebGL vendor/renderer sanitization.
+  // Keep native GPU values when they are already hardware-backed. Only replace
+  // obvious software renderers, so WebGL stays consistent with WebGPU and
+  // worker OffscreenCanvas on Apple Silicon.
+  const getFallbackWebGLProfile = () => {
+    if (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || '')) {
+      return {
+        vendor: 'Google Inc. (Apple)',
+        renderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)',
+      };
+    }
+    return {
+      vendor: 'Intel Inc.',
+      renderer: 'Intel Iris OpenGL Engine',
+    };
   };
-  const getParameterProto2 = WebGL2RenderingContext.prototype.getParameter;
-  WebGL2RenderingContext.prototype.getParameter = function (param) {
-    if (param === 0x9245) return 'Intel Inc.';
-    if (param === 0x9246) return 'Intel Iris OpenGL Engine';
-    return getParameterProto2.call(this, param);
+  const sanitizeWebGLValue = (nativeValue, nativeRenderer, key) => {
+    const fallback = getFallbackWebGLProfile();
+    const nativeString = typeof nativeValue === 'string' ? nativeValue : '';
+    const rendererString = typeof nativeRenderer === 'string' ? nativeRenderer : nativeString;
+    if (!nativeString || /SwiftShader|llvmpipe|Software Rasterizer/i.test(rendererString)) {
+      return fallback[key];
+    }
+    return nativeString;
   };
+  const patchWebGLContext = proto => {
+    if (!proto || typeof proto.getParameter !== 'function') {
+      return;
+    }
+    const originalGetParameter = proto.getParameter;
+    const wrappedGetParameter = function getParameter(param) {
+      if (param === 0x9245 || param === 0x9246) {
+        let nativeVendor = '';
+        let nativeRenderer = '';
+        try {
+          nativeVendor = originalGetParameter.call(this, 0x9245);
+          nativeRenderer = originalGetParameter.call(this, 0x9246);
+        } catch (_e) { /* ignore */ }
+        if (param === 0x9245) {
+          return sanitizeWebGLValue(nativeVendor, nativeRenderer, 'vendor');
+        }
+        return sanitizeWebGLValue(nativeRenderer, nativeRenderer, 'renderer');
+      }
+      return originalGetParameter.call(this, param);
+    };
+    proto.getParameter = wrappedGetParameter;
+  };
+  patchWebGLContext(typeof WebGLRenderingContext !== 'undefined' ? WebGLRenderingContext.prototype : null);
+  patchWebGLContext(typeof WebGL2RenderingContext !== 'undefined' ? WebGL2RenderingContext.prototype : null);
 
   // 8. Fix window.outerWidth/outerHeight (0 in headless → match inner)
   if (window.outerWidth === 0) {
@@ -223,6 +474,81 @@ export const STEALTH_INIT_SCRIPT = `
   };
   patchedFns.add(nativeToString);
   Function.prototype.toString = nativeToString;
+  try {
+    if (typeof WebGLRenderingContext !== 'undefined') {
+      patchedFns.add(WebGLRenderingContext.prototype.getParameter);
+    }
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+      patchedFns.add(WebGL2RenderingContext.prototype.getParameter);
+    }
+  } catch (_e) { /* ignore */ }
+
+  // Patch Worker/SharedWorker constructors so detector-created Blob workers get
+  // the same navigator and WebGL profile as the main realm before their code
+  // executes.
+  const workerStealthSource = ${JSON.stringify(STEALTH_WORKER_INIT_SCRIPT)};
+  const buildWorkerConfig = () => {
+    const config = {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      language: navigator.language,
+      languages: Array.from(navigator.languages || []),
+      hardwareConcurrency: navigator.hardwareConcurrency,
+    };
+    if (typeof navigator.deviceMemory === 'number') {
+      config.deviceMemory = navigator.deviceMemory;
+    }
+    return config;
+  };
+  const makeWrappedWorkerUrl = (scriptURL, options) => {
+    const rawURL = String(scriptURL);
+    const absoluteURL = new URL(rawURL, location.href).href;
+    const isModule = options && typeof options === 'object' && options.type === 'module';
+    const bootstrap =
+      'globalThis.__stealthWorkerConfig = ' + JSON.stringify(buildWorkerConfig()) + ';\\n' +
+      workerStealthSource + '\\n' +
+      'try { delete globalThis.__stealthWorkerConfig; } catch (_e) {}\\n';
+    const source = isModule
+      ? bootstrap + 'import ' + JSON.stringify(absoluteURL) + ';'
+      : bootstrap + 'importScripts(' + JSON.stringify(absoluteURL) + ');';
+    return URL.createObjectURL(new Blob([source], { type: 'application/javascript' }));
+  };
+  const patchWorkerConstructor = (name) => {
+    const NativeWorker = window[name];
+    if (typeof NativeWorker !== 'function') {
+      return;
+    }
+    const WrappedWorker = new Proxy(NativeWorker, {
+      construct: (target, args, newTarget) => {
+        let wrappedURL = null;
+        try {
+          if (args.length > 0) {
+            const nextArgs = Array.from(args);
+            wrappedURL = makeWrappedWorkerUrl(nextArgs[0], nextArgs[1]);
+            nextArgs[0] = wrappedURL;
+            return Reflect.construct(target, nextArgs, newTarget);
+          }
+        } catch (_e) {
+          if (wrappedURL) {
+            try { URL.revokeObjectURL(wrappedURL); } catch (_revokeError) { /* ignore */ }
+          }
+        }
+        return Reflect.construct(target, args, newTarget);
+      },
+      apply: (target, thisArg, args) => Reflect.apply(target, thisArg, args),
+    });
+    patchedFns.add(WrappedWorker);
+    try {
+      Object.defineProperty(WrappedWorker, 'name', { value: name, configurable: true });
+    } catch (_e) { /* ignore */ }
+    Object.defineProperty(window, name, {
+      value: WrappedWorker,
+      writable: true,
+      configurable: true,
+    });
+  };
+  patchWorkerConstructor('Worker');
+  patchWorkerConstructor('SharedWorker');
 
   // 11. navigator.maxTouchPoints — ensure non-zero when expected
   // Some detection checks for inconsistency between mobile UA and touchPoints
@@ -254,12 +580,34 @@ export const STEALTH_INIT_SCRIPT = `
   const NativeError = Error;
   const sanitizeErrorInstance = (error) => {
     try {
-      const stack = error?.stack;
-      if (typeof stack === 'string') {
+      if (!error || (typeof error !== 'object' && typeof error !== 'function')) {
+        return error;
+      }
+      const stackDesc = Object.getOwnPropertyDescriptor(error, 'stack');
+      if (!stackDesc) {
+        return error;
+      }
+      if ('value' in stackDesc) {
+        if (typeof stackDesc.value === 'string') {
+          Object.defineProperty(error, 'stack', {
+            value: sanitizeStackString(stackDesc.value),
+            writable: true,
+            configurable: true,
+          });
+        }
+        return error;
+      }
+      if (typeof stackDesc.get === 'function') {
+        const originalStackGetter = stackDesc.get;
+        const sanitizedStackGetter = function stack() {
+          return sanitizeStackString(originalStackGetter.call(this));
+        };
+        patchedFns.add(sanitizedStackGetter);
         Object.defineProperty(error, 'stack', {
-          value: sanitizeStackString(stack),
-          writable: true,
-          configurable: true,
+          get: sanitizedStackGetter,
+          set: stackDesc.set,
+          enumerable: stackDesc.enumerable,
+          configurable: stackDesc.configurable,
         });
       }
     } catch (_e) { /* ignore */ }
@@ -280,6 +628,7 @@ export const STEALTH_INIT_SCRIPT = `
     writable: true,
     configurable: true,
   });
+  try { delete window.__stealthPatchedFns; } catch (_e) { /* ignore */ }
 })();
 `;
 
@@ -344,11 +693,66 @@ export async function applyStealthToPage(page: Page): Promise<void> {
   await applyCdpStealth(page);
 }
 
+const stealthAutoAttachBrowsers = new WeakSet<Browser>();
+
+async function applyStealthAutoAttachToBrowser(
+  browser: Browser,
+): Promise<void> {
+  if (stealthAutoAttachBrowsers.has(browser)) {
+    return;
+  }
+  stealthAutoAttachBrowsers.add(browser);
+
+  try {
+    const browserSession = await browser.target().createCDPSession();
+
+    browserSession.on(
+      CDPSessionEvent.SessionAttached,
+      async (childSession: CDPSession) => {
+        try {
+          await childSession.send('Page.addScriptToEvaluateOnNewDocument', {
+            source: STEALTH_INIT_SCRIPT,
+          });
+        } catch {
+          // Worker and service worker targets don't support the Page domain.
+        }
+        try {
+          await childSession.send('Runtime.evaluate', {
+            expression: STEALTH_WORKER_AUTO_ATTACH_SCRIPT,
+            returnByValue: true,
+          });
+        } catch {
+          // Some targets may not have an execution context yet.
+        }
+        try {
+          await childSession.send('Runtime.runIfWaitingForDebugger');
+        } catch {
+          // Ignore if the target has already closed.
+        }
+        try {
+          await childSession.detach();
+        } catch {
+          // If detach fails, the target may already be gone.
+        }
+      },
+    );
+
+    await browserSession.send('Target.setAutoAttach', {
+      autoAttach: true,
+      waitForDebuggerOnStart: true,
+      flatten: true,
+    });
+  } catch {
+    // Fall back to targetcreated/evaluateOnNewDocument only.
+  }
+}
+
 /**
  * Applies stealth patches to all existing pages in the browser and
  * automatically patches any page created afterwards.
  */
 export async function applyStealthToBrowser(browser: Browser): Promise<void> {
+  await applyStealthAutoAttachToBrowser(browser);
   const pages = await browser.pages();
   await Promise.all(pages.map(page => applyStealthToPage(page)));
 
@@ -460,6 +864,13 @@ export const ANTI_DEVTOOLS_INIT_SCRIPT = `
     if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
       return value;
     }
+    const tag = Object.prototype.toString.call(value);
+    if (tag === '[object Error]' || value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+      };
+    }
     if (typeof value === 'function') {
       return 'function ' + (value.name || '') + '() { [native code] }';
     }
@@ -467,7 +878,7 @@ export const ANTI_DEVTOOLS_INIT_SCRIPT = `
       return '[Circular]';
     }
     if (depth >= 3) {
-      return Object.prototype.toString.call(value);
+      return tag;
     }
     seen.add(value);
 
@@ -575,6 +986,13 @@ const ANTI_DEVTOOLS_IMMEDIATE_SCRIPT = `
     if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
       return value;
     }
+    const tag = Object.prototype.toString.call(value);
+    if (tag === '[object Error]' || value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+      };
+    }
     if (typeof value === 'function') {
       return 'function ' + (value.name || '') + '() { [native code] }';
     }
@@ -582,7 +1000,7 @@ const ANTI_DEVTOOLS_IMMEDIATE_SCRIPT = `
       return '[Circular]';
     }
     if (depth >= 3) {
-      return Object.prototype.toString.call(value);
+      return tag;
     }
     seen.add(value);
 

@@ -119,6 +119,93 @@ describe('browser', () => {
         return desc!.get!.toString().includes('[native code]');
       });
       assert.strictEqual(toStringCheck, true);
+
+      const stealthMarkerCheck = await page.evaluate(
+        () => '__stealthPatchedFns' in window,
+      );
+      assert.strictEqual(stealthMarkerCheck, false);
+
+      const errorStackTrap = await page.evaluate(() => {
+        let wasAccessed = false;
+        const originalPrepareStackTrace = Error.prepareStackTrace;
+        Error.prepareStackTrace = function () {
+          wasAccessed = true;
+          return originalPrepareStackTrace;
+        };
+        try {
+          new Error('stack probe');
+          return wasAccessed;
+        } finally {
+          Error.prepareStackTrace = originalPrepareStackTrace;
+        }
+      });
+      assert.strictEqual(errorStackTrap, false);
+
+      const workerConsistency = await page.evaluate(
+        () =>
+          new Promise(resolve => {
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl');
+            const mainWebGL = {
+              vendor: gl ? gl.getParameter(0x9245) : 'NA',
+              renderer: gl ? gl.getParameter(0x9246) : 'NA',
+            };
+            const workerCode = `
+              const data = {
+                webdriver: navigator.webdriver,
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                webgl: { vendor: 'NA', renderer: 'NA' },
+              };
+              try {
+                const canvas = new OffscreenCanvas(1, 1);
+                const gl = canvas.getContext('webgl');
+                if (gl) {
+                  data.webgl.vendor = gl.getParameter(0x9245);
+                  data.webgl.renderer = gl.getParameter(0x9246);
+                }
+              } catch (_e) {}
+              self.postMessage(data);
+            `;
+            const workerUrl = URL.createObjectURL(
+              new Blob([workerCode], {type: 'application/javascript'}),
+            );
+            const worker = new Worker(workerUrl);
+            worker.onmessage = event => {
+              URL.revokeObjectURL(workerUrl);
+              worker.terminate();
+              const workerData = event.data;
+              resolve({
+                created: true,
+                webglMatches:
+                  workerData.webgl.vendor === mainWebGL.vendor &&
+                  workerData.webgl.renderer === mainWebGL.renderer,
+                webdriverMatches: workerData.webdriver === navigator.webdriver,
+                userAgentMatches: workerData.userAgent === navigator.userAgent,
+                platformMatches: workerData.platform === navigator.platform,
+              });
+            };
+            worker.onerror = () => {
+              URL.revokeObjectURL(workerUrl);
+              worker.terminate();
+              resolve({
+                created: false,
+                webglMatches: false,
+                webdriverMatches: false,
+                userAgentMatches: false,
+                platformMatches: false,
+              });
+            };
+          }),
+      );
+      assert.deepStrictEqual(workerConsistency, {
+        created: true,
+        webglMatches: true,
+        webdriverMatches: true,
+        userAgentMatches: true,
+        platformMatches: true,
+      });
     } finally {
       await browser.close();
     }
@@ -175,6 +262,24 @@ describe('browser', () => {
         return v === Math.round(v);
       });
       assert.strictEqual(perfRounded, true);
+
+      const consoleStackTrap = await page.evaluate(
+        () =>
+          new Promise(resolve => {
+            let wasAccessed = false;
+            const originalPrepareStackTrace = Error.prepareStackTrace;
+            Error.prepareStackTrace = function () {
+              wasAccessed = true;
+              return originalPrepareStackTrace;
+            };
+            console.log(new Error('console stack probe'));
+            setTimeout(() => {
+              Error.prepareStackTrace = originalPrepareStackTrace;
+              resolve(wasAccessed);
+            }, 25);
+          }),
+      );
+      assert.strictEqual(consoleStackTrap, false);
     } finally {
       await browser.close();
     }
