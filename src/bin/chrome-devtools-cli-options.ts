@@ -81,6 +81,19 @@ export const commands: Commands = {
       },
     },
   },
+  close_heapsnapshot: {
+    description:
+      'Closes a previously loaded memory heapsnapshot, freeing its memory. (requires flag: --memoryDebugging=true)',
+    category: 'Memory',
+    args: {
+      filePath: {
+        name: 'filePath',
+        type: 'string',
+        description: 'A path to the .heapsnapshot file to close.',
+        required: true,
+      },
+    },
+  },
   close_page: {
     description:
       'Closes the page by its index. The last open page cannot be closed.',
@@ -293,7 +306,7 @@ export const commands: Commands = {
   },
   get_heapsnapshot_class_nodes: {
     description:
-      'Loads a memory heapsnapshot and returns instances of a specific class with their IDs. (requires flag: --experimentalMemory=true)',
+      'Loads a memory heapsnapshot and returns instances of a specific class with their IDs. (requires flag: --memoryDebugging=true)',
     category: 'Memory',
     args: {
       filePath: {
@@ -324,7 +337,7 @@ export const commands: Commands = {
   },
   get_heapsnapshot_details: {
     description:
-      'Loads a memory heapsnapshot and returns all available information including statistics, static data, and aggregated node information. Supports pagination for aggregates. (requires flag: --experimentalMemory=true)',
+      'Loads a memory heapsnapshot and returns all available information including statistics, static data, and aggregated node information. Supports pagination for aggregates. (requires flag: --memoryDebugging=true)',
     category: 'Memory',
     args: {
       filePath: {
@@ -349,7 +362,7 @@ export const commands: Commands = {
   },
   get_heapsnapshot_retainers: {
     description:
-      'Loads a memory heapsnapshot and returns retainers for a specific node ID. (requires flag: --experimentalMemory=true)',
+      'Loads a memory heapsnapshot and returns retainers for a specific node ID. (requires flag: --memoryDebugging=true)',
     category: 'Memory',
     args: {
       filePath: {
@@ -380,7 +393,7 @@ export const commands: Commands = {
   },
   get_heapsnapshot_summary: {
     description:
-      'Loads a memory heapsnapshot and returns snapshot summary stats. (requires flag: --experimentalMemory=true)',
+      'Loads a memory heapsnapshot and returns snapshot summary stats. (requires flag: --memoryDebugging=true)',
     category: 'Memory',
     args: {
       filePath: {
@@ -541,6 +554,13 @@ export const commands: Commands = {
           'Set to true to return the preserved messages over the last 3 navigations.',
         required: false,
         default: false,
+      },
+      serviceWorkerId: {
+        name: 'serviceWorkerId',
+        type: 'string',
+        description:
+          'Filter messages to only return messages of the specified service worker.',
+        required: false,
       },
     },
   },

@@ -27,10 +27,7 @@ import type {PaginationOptions} from '../utils/types.js';
 import type {WaitForEventsResult} from '../WaitForHelper.js';
 
 import type {ToolCategory} from './categories.js';
-import type {
-  ToolGroup,
-  ToolDefinition as ThirdPartyDeveloperToolDefinition,
-} from './thirdPartyDeveloper.js';
+import type {ToolGroups} from './thirdPartyDeveloper.js';
 
 export interface BaseToolDefinition<
   Schema extends zod.ZodRawShape = zod.ZodRawShape,
@@ -48,6 +45,7 @@ export interface BaseToolDefinition<
   };
   schema: Schema;
   blockedByDialog: boolean;
+  verifyFilesSchema: Array<keyof Schema>;
 }
 
 export interface ToolDefinition<
@@ -132,6 +130,7 @@ export interface Response {
     options?: PaginationOptions & {
       types?: string[];
       includePreservedMessages?: boolean;
+      serviceWorkerId?: string;
     },
   ): void;
   includeSnapshot(params?: SnapshotParams): void;
@@ -250,6 +249,7 @@ export type Context = Readonly<{
     filePath: string,
     nodeId: number,
   ): Promise<DevTools.HeapSnapshotModel.HeapSnapshotModel.ItemsRange>;
+  closeHeapSnapshot(filePath: string): Promise<boolean>;
 }>;
 
 /**
@@ -269,9 +269,8 @@ export type ContextPage = Readonly<{
     action: () => Promise<unknown>,
     options?: {timeout?: number; handleDialog?: 'accept' | 'dismiss' | string},
   ): Promise<WaitForEventsResult>;
-  getThirdPartyDeveloperTools():
-    | ToolGroup<ThirdPartyDeveloperToolDefinition>
-    | undefined;
+  getThirdPartyDeveloperTools(): ToolGroups;
+
   executeThirdPartyDeveloperTool(
     toolName: string,
     params: Record<string, unknown>,

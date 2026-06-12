@@ -57,6 +57,8 @@ export async function ensureBrowserConnected(options: {
   channel?: Channel;
   userDataDir?: string;
   enableExtensions?: boolean;
+  blocklist?: string[];
+  allowlist?: string[];
 }) {
   const {channel, enableExtensions} = options;
   if (browser?.connected) {
@@ -67,6 +69,8 @@ export async function ensureBrowserConnected(options: {
     targetFilter: makeTargetFilter(enableExtensions),
     defaultViewport: null,
     handleDevToolsAsPage: true,
+    blocklist: options.blocklist,
+    allowlist: options.allowlist,
   };
 
   let autoConnect = false;
@@ -124,7 +128,7 @@ export async function ensureBrowserConnected(options: {
     );
   }
 
-  logger('Connecting Puppeteer to ', JSON.stringify(connectOptions));
+  logger?.('Connecting Puppeteer to ', JSON.stringify(connectOptions));
   try {
     // Assign mode before browser so a concurrent closeBrowser() never sees
     // `browser` set with `browserMode` still undefined (would fall through
@@ -140,7 +144,7 @@ export async function ensureBrowserConnected(options: {
       },
     );
   }
-  logger('Connected Puppeteer');
+  logger?.('Connected Puppeteer');
   return browser;
 }
 
@@ -163,6 +167,8 @@ interface McpLaunchOptions {
   stealth?: boolean;
   antiDevtoolsDetection?: boolean;
   viaCli?: boolean;
+  blocklist?: string[];
+  allowlist?: string[];
 }
 
 export function detectDisplay(): void {
@@ -230,6 +236,7 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
 
   if (headless) {
     args.push('--screen-info={3840x2160}');
+    args.push('--disable-frame-rate-limit');
   }
   let puppeteerChannel: ChromeReleaseChannel | undefined;
   if (options.devtools) {
@@ -260,6 +267,8 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
       acceptInsecureCerts: options.acceptInsecureCerts,
       handleDevToolsAsPage: true,
       enableExtensions: options.enableExtensions,
+      blocklist: options.blocklist,
+      allowlist: options.allowlist,
     });
     if (options.logFile) {
       // FIXME: we are probably subscribing too late to catch startup logs. We
@@ -329,11 +338,11 @@ export async function closeBrowser(): Promise<void> {
     const browserProcess = b.process();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const closePromise = b.close().catch(err => {
-      logger('Failed to close browser', err);
+      logger?.('Failed to close browser', err);
     });
     const timeoutPromise = new Promise<void>(resolve => {
       timeout = setTimeout(() => {
-        logger('Browser close timed out, killing Chrome');
+        logger?.('Browser close timed out, killing Chrome');
         browserProcess?.kill('SIGKILL');
         resolve();
       }, BROWSER_CLOSE_TIMEOUT_MS);
@@ -347,7 +356,7 @@ export async function closeBrowser(): Promise<void> {
     return;
   }
   await b.disconnect().catch(err => {
-    logger('Failed to disconnect from browser', err);
+    logger?.('Failed to disconnect from browser', err);
   });
 }
 

@@ -21,6 +21,7 @@ import {
   type ListenerMap,
   type UncaughtError,
 } from './PageCollector.js';
+import {ServiceWorkerConsoleCollector} from './ServiceWorkerCollector.js';
 import {applyAntiDevtoolsDetection, applyStealthToPage} from './stealth.js';
 import {
   Locator,
@@ -28,7 +29,6 @@ import {
   type Browser,
   type BrowserContext,
   type ConsoleMessage,
-  type Debugger,
   type HTTPRequest,
   type Page,
   type ScreenRecorder,
@@ -42,6 +42,7 @@ import {listPages} from './tools/pages.js';
 import {CLOSE_PAGE_ERROR} from './tools/ToolDefinition.js';
 import type {Context, SupportedExtensions} from './tools/ToolDefinition.js';
 import type {TraceResult} from './trace-processing/parse.js';
+import type {Logger} from './types.js';
 import type {
   EmulationSettings,
   GeolocationOptions,
@@ -65,6 +66,8 @@ interface McpContextOptions {
   stealth?: boolean;
   // Whether anti-DevTools-detection mode is enabled — blocks detection scripts on new pages.
   antiDevtoolsDetection?: boolean;
+  // Whether allowlist/blocklist is configured.
+  hasNetworkBlockOrAllowlist?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 5_000;
@@ -72,7 +75,7 @@ const NAVIGATION_TIMEOUT = 10_000;
 
 export class McpContext implements Context {
   browser: Browser;
-  logger: Debugger;
+  logger: Logger;
 
   // Maps LLM-provided isolatedContext name → Puppeteer BrowserContext.
   #isolatedContexts = new Map<string, BrowserContext>();
@@ -87,6 +90,7 @@ export class McpContext implements Context {
   #networkCollector: NetworkCollector;
   #consoleCollector: ConsoleCollector;
   #devtoolsUniverseManager: UniverseManager;
+  #serviceWorkerConsoleCollector: ServiceWorkerConsoleCollector;
 
   #isRunningTrace = false;
   #screenRecorderData: {recorder: ScreenRecorder; filePath: string} | null =
@@ -107,7 +111,7 @@ export class McpContext implements Context {
 
   private constructor(
     browser: Browser,
-    logger: Debugger,
+    logger: Logger,
     options: McpContextOptions,
     locatorClass: typeof Locator,
   ) {
@@ -131,21 +135,26 @@ export class McpContext implements Context {
         },
       } as ListenerMap;
     });
+    this.#serviceWorkerConsoleCollector = new ServiceWorkerConsoleCollector(
+      this.browser,
+    );
     this.#devtoolsUniverseManager = new UniverseManager(this.browser);
   }
 
   async #init() {
     const pages = await this.createPagesSnapshot();
-    await this.createExtensionServiceWorkersSnapshot();
+    const workers = await this.createExtensionServiceWorkersSnapshot();
     await this.#networkCollector.init(pages);
     await this.#consoleCollector.init(pages);
     await this.#devtoolsUniverseManager.init(pages);
+    await this.#serviceWorkerConsoleCollector.init(workers);
   }
 
   dispose() {
     this.#networkCollector.dispose();
     this.#consoleCollector.dispose();
     this.#devtoolsUniverseManager.dispose();
+    this.#serviceWorkerConsoleCollector.dispose();
     for (const mcpPage of this.#mcpPages.values()) {
       mcpPage.dispose();
     }
@@ -158,7 +167,7 @@ export class McpContext implements Context {
 
   static async from(
     browser: Browser,
-    logger: Debugger,
+    logger: Logger,
     opts: McpContextOptions,
     /* Let tests use unbundled Locator class to avoid overly strict checks within puppeteer that fail when mixing bundled and unbundled class instances */
     locatorClass: typeof Locator = Locator,
@@ -241,7 +250,7 @@ export class McpContext implements Context {
 
   resolveCdpRequestId(page: McpPage, cdpRequestId: string): number | undefined {
     if (!cdpRequestId) {
-      this.logger('no network request');
+      this.logger?.('no network request');
       return;
     }
     const request = this.#networkCollector.find(page.pptrPage, request => {
@@ -249,7 +258,7 @@ export class McpContext implements Context {
       return request.id === cdpRequestId;
     });
     if (!request) {
-      this.logger('no network request for ' + cdpRequestId);
+      this.logger?.('no network request for ' + cdpRequestId);
       return;
     }
     return this.#networkCollector.getIdForResource(request);
@@ -356,7 +365,14 @@ export class McpContext implements Context {
     const mcpPage = this.#getMcpPage(page);
     const newSettings: EmulationSettings = {...mcpPage.emulationSettings};
 
-    if (!options.networkConditions) {
+    // Skip network emulation if blocklist/allowlist is configured, as it conflicts with blocking rules in Puppeteer.
+    if (this.#options.hasNetworkBlockOrAllowlist) {
+      if (options.networkConditions !== undefined) {
+        throw new Error(
+          'Network throttling is not supported when network blocking (allowlist/blocklist) is configured.',
+        );
+      }
+    } else if (!options.networkConditions) {
       await page.emulateNetworkConditions(null);
       delete newSettings.networkConditions;
     } else if (options.networkConditions === 'Offline') {
@@ -592,6 +608,12 @@ export class McpContext implements Context {
     return this.#extensionServiceWorkers;
   }
 
+  getServiceWorkerConsoleData(
+    extensionId: string,
+  ): Array<ConsoleMessage | UncaughtError> {
+    return this.#serviceWorkerConsoleCollector.getData(extensionId);
+  }
+
   async createPagesSnapshot(): Promise<Page[]> {
     const {pages: allPages, isolatedContextNames} = await this.#getAllPages();
 
@@ -602,7 +624,7 @@ export class McpContext implements Context {
         this.#mcpPages.set(page, mcpPage);
         // We emulate a focused page for all pages to support multi-agent workflows.
         void page.emulateFocusedPage(true).catch(error => {
-          this.logger('Error turning on focused page emulation', error);
+          this.logger?.('Error turning on focused page emulation', error);
         });
       }
       mcpPage.isolatedContextName = isolatedContextNames.get(page);
@@ -666,7 +688,7 @@ export class McpContext implements Context {
             page = await target.asPage();
             this.#extensionPages.set(target, page);
           } catch (e) {
-            this.logger('Failed to get page for extension target', e);
+            this.logger?.('Failed to get page for extension target', e);
           }
         }
       }
@@ -707,7 +729,7 @@ export class McpContext implements Context {
   }
 
   async detectOpenDevToolsWindows() {
-    this.logger('Detecting open DevTools windows');
+    this.logger?.('Detecting open DevTools windows');
     const {pages} = await this.#getAllPages();
 
     await Promise.all(
@@ -780,7 +802,7 @@ export class McpContext implements Context {
       await fs.writeFile(filePath, data);
       return {filename: filePath};
     } catch (err) {
-      this.logger(err);
+      this.logger?.(err);
       throw new Error('Could not save a file', {cause: err});
     }
   }
@@ -899,5 +921,13 @@ export class McpContext implements Context {
     nodeId: number,
   ): Promise<DevTools.HeapSnapshotModel.HeapSnapshotModel.ItemsRange> {
     return await this.#heapSnapshotManager.getRetainers(filePath, nodeId);
+  }
+
+  async closeHeapSnapshot(filePath: string): Promise<boolean> {
+    return this.#heapSnapshotManager.dispose(filePath);
+  }
+
+  hasHeapSnapshots(): boolean {
+    return this.#heapSnapshotManager.hasSnapshots();
   }
 }

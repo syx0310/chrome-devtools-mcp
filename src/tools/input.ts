@@ -34,7 +34,7 @@ const submitKeySchema = zod
   );
 
 function handleActionError(error: unknown, uid: string) {
-  logger('failed to act using a locator', error);
+  logger?.('failed to act using a locator', error);
   throw new Error(
     `Failed to interact with the element with uid ${uid}. The element did not become interactive within the configured timeout.`,
     {
@@ -103,6 +103,7 @@ export const click = definePageTool({
     includeSnapshot: includeSnapshotSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: [],
   handler: async (request, response) => {
     const uid = request.params.uid;
     const handle = await request.page.getElementByUid(uid);
@@ -154,6 +155,7 @@ export const clickAt = definePageTool({
     includeSnapshot: includeSnapshotSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: [],
   handler: async (request, response) => {
     const page = request.page;
     const result = await page.waitForEventsAfterAction(async () => {
@@ -189,6 +191,7 @@ export const hover = definePageTool({
     includeSnapshot: includeSnapshotSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: [],
   handler: async (request, response) => {
     const uid = request.params.uid;
     const handle = await request.page.getElementByUid(uid);
@@ -331,6 +334,7 @@ export const fill = definePageTool({
     includeSnapshot: includeSnapshotSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: [],
   handler: async (request, response, context) => {
     const page = request.page;
     const result = await page.waitForEventsAfterAction(async () => {
@@ -361,6 +365,7 @@ export const typeText = definePageTool({
     submitKey: submitKeySchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: [],
   handler: async (request, response) => {
     const page = request.page;
     const result = await page.waitForEventsAfterAction(async () => {
@@ -391,6 +396,7 @@ export const drag = definePageTool({
     includeSnapshot: includeSnapshotSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: [],
   handler: async (request, response) => {
     const fromHandle = await request.page.getElementByUid(
       request.params.from_uid,
@@ -438,6 +444,7 @@ export const fillForm = definePageTool({
     includeSnapshot: includeSnapshotSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: [],
   handler: async (request, response, context) => {
     const page = request.page;
     let lastResult: WaitForEventsResult = {};
@@ -476,9 +483,9 @@ export const uploadFile = definePageTool({
     includeSnapshot: includeSnapshotSchema,
   },
   blockedByDialog: true,
-  handler: async (request, response, context) => {
+  verifyFilesSchema: ['filePath'],
+  handler: async (request, response, _context) => {
     const {uid, filePath} = request.params;
-    await context.validatePath(filePath);
     const handle = (await request.page.getElementByUid(
       uid,
     )) as ElementHandle<HTMLInputElement>;
@@ -527,6 +534,7 @@ export const pressKey = definePageTool({
     includeSnapshot: includeSnapshotSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: [],
   handler: async (request, response) => {
     const page = request.page;
     const tokens = parseKey(request.params.key);

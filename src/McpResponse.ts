@@ -17,7 +17,7 @@ import type {McpContext} from './McpContext.js';
 import type {McpPage} from './McpPage.js';
 import {UncaughtError} from './PageCollector.js';
 import {TextSnapshot} from './TextSnapshot.js';
-import {DevTools, type Protocol} from './third_party/index.js';
+import {DevTools, toonEncode, type Protocol} from './third_party/index.js';
 import type {
   ConsoleMessage,
   ImageContent,
@@ -28,7 +28,7 @@ import type {
   Extension,
 } from './third_party/index.js';
 import {handleDialog} from './tools/pages.js';
-import type {ToolGroup, ToolDefinition} from './tools/thirdPartyDeveloper.js';
+import type {ToolGroups} from './tools/thirdPartyDeveloper.js';
 import type {
   DevToolsData,
   ImageContentData,
@@ -99,9 +99,7 @@ export function replaceHtmlElementsWithUids(schema: JSONSchema7Definition) {
   }
 }
 
-async function getToolGroup(
-  page: McpPage,
-): Promise<ToolGroup<ToolDefinition> | undefined | null> {
+async function getToolGroups(page: McpPage): Promise<ToolGroups> {
   // Check if there is a `devtoolstooldiscovery` event listener
   const windowHandle = await page.pptrPage.evaluateHandle(() => window);
   // @ts-expect-error internal API
@@ -111,51 +109,88 @@ async function getToolGroup(
       objectId: windowHandle.remoteObject().objectId,
     });
   if (listeners.find(l => l.type === 'devtoolstooldiscovery') === undefined) {
-    return;
+    return [];
   }
 
-  const toolGroup = await page.pptrPage.evaluate(() => {
-    return new Promise<ToolGroup<ToolDefinition> | undefined | null>(
-      resolve => {
-        const event = new CustomEvent('devtoolstooldiscovery');
-        // @ts-expect-error Adding custom property
-        event.respondWith = (toolGroup: ToolGroup) => {
-          if (!window.__dtmcp) {
-            window.__dtmcp = {};
-          }
-          window.__dtmcp.toolGroup = toolGroup;
+  const toolGroups = await page.pptrPage.evaluate(() => {
+    return new Promise<ToolGroups>(resolve => {
+      const event = new CustomEvent('devtoolstooldiscovery');
+      const groups: ToolGroups = [];
+      // @ts-expect-error Adding custom property
+      event.respondWith = toolGroup => {
+        if (!window.__dtmcp) {
+          window.__dtmcp = {};
+        }
+        if (!window.__dtmcp.toolGroups) {
+          window.__dtmcp.toolGroups = [];
+        }
 
-          // When receiving a toolGroup for the first time, expose a simple execution helper
-          if (!window.__dtmcp.executeTool) {
-            window.__dtmcp.executeTool = async (toolName, args) => {
-              if (!window.__dtmcp?.toolGroup) {
-                throw new Error('No tools found on the page');
-              }
-              const tool = window.__dtmcp.toolGroup.tools.find(
-                t => t.name === toolName,
-              );
-              if (!tool) {
-                throw new Error(`Tool ${toolName} not found`);
-              }
-              return await tool.execute(args);
-            };
+        if (
+          typeof toolGroup.name !== 'string' ||
+          typeof toolGroup.description !== 'string' ||
+          !Array.isArray(toolGroup.tools)
+        ) {
+          console.error('Invalid toolGroup:', toolGroup);
+          return;
+        }
+        for (const tool of toolGroup.tools) {
+          if (
+            typeof tool.name !== 'string' ||
+            typeof tool.description !== 'string' ||
+            typeof tool.inputSchema !== 'object' ||
+            typeof tool.execute !== 'function'
+          ) {
+            console.error('Invalid tool:', tool);
+            return;
           }
+        }
 
-          resolve(toolGroup);
-        };
-        window.dispatchEvent(event);
-        // If the page does not synchronously call `event.respondWith`, return instead of timing out
+        window.__dtmcp.toolGroups.push(toolGroup);
+
+        // When receiving a toolGroup for the first time, expose a simple execution helper
+        if (!window.__dtmcp.executeTool) {
+          window.__dtmcp.executeTool = async (toolName, args) => {
+            if (
+              !window.__dtmcp?.toolGroups ||
+              window.__dtmcp.toolGroups.length === 0
+            ) {
+              throw new Error('No tools found on the page');
+            }
+            for (const group of window.__dtmcp.toolGroups) {
+              const tool = group.tools?.find(t => t.name === toolName);
+              if (tool) {
+                return await tool.execute(args);
+              }
+            }
+            throw new Error(`Tool ${toolName} not found`);
+          };
+        }
+
+        groups.push(toolGroup);
+      };
+      window.dispatchEvent(event);
+      // If at least one toolGroup was added synchronously, resolve with the array.
+      // Otherwise, use setTimeout to allow for any microtask/asynchronous respondWith calls, or resolve with an empty array.
+      if (groups.length > 0) {
+        resolve(groups);
+      } else {
         setTimeout(() => {
-          resolve(null);
+          if (groups.length > 0) {
+            resolve(groups);
+          } else {
+            resolve([]);
+          }
         }, 0);
-      },
-    );
+      }
+    });
   });
 
-  for (const tool of toolGroup?.tools ?? []) {
-    replaceHtmlElementsWithUids(tool.inputSchema);
+  for (const group of toolGroups) {
+    for (const tool of group.tools ?? []) {
+      replaceHtmlElementsWithUids(tool.inputSchema);
+    }
   }
-  return toolGroup;
+  return toolGroups;
 }
 
 export class McpResponse implements Response {
@@ -197,6 +232,7 @@ export class McpResponse implements Response {
     pagination?: PaginationOptions;
     types?: string[];
     includePreservedMessages?: boolean;
+    serviceWorkerId?: string;
   };
   #listExtensions?: boolean;
   #listThirdPartyDeveloperTools?: boolean;
@@ -208,6 +244,10 @@ export class McpResponse implements Response {
   #redactNetworkHeaders = true;
   #error?: Error;
   #attachedWaitForResult?: WaitForEventsResult;
+
+  get #deviceScope(): DevTools.CrUXManager.DeviceScope {
+    return this.#page?.viewport?.isMobile ? 'PHONE' : 'DESKTOP';
+  }
 
   constructor(args: ParsedArguments) {
     this.#args = args;
@@ -289,6 +329,7 @@ export class McpResponse implements Response {
     options?: PaginationOptions & {
       types?: string[];
       includePreservedMessages?: boolean;
+      serviceWorkerId?: string;
     },
   ): void {
     if (!value) {
@@ -307,6 +348,7 @@ export class McpResponse implements Response {
           : undefined,
       types: options?.types,
       includePreservedMessages: options?.includePreservedMessages,
+      serviceWorkerId: options?.serviceWorkerId,
     };
   }
 
@@ -456,6 +498,7 @@ export class McpResponse implements Response {
   async handle(
     toolName: string,
     context: McpContext,
+    useToon = false,
   ): Promise<{
     content: Array<TextContent | ImageContent>;
     structuredContent: object;
@@ -558,14 +601,13 @@ export class McpResponse implements Response {
       extensions = await context.listExtensions();
     }
 
-    // Null indicates no tools.
-    let thirdPartyDeveloperTools: ToolGroup<ToolDefinition> | undefined | null;
+    let thirdPartyDeveloperTools: ToolGroups = [];
     if (
       this.#args.categoryExperimentalThirdParty &&
       this.#listThirdPartyDeveloperTools &&
       this.#page
     ) {
-      thirdPartyDeveloperTools = await getToolGroup(this.#page);
+      thirdPartyDeveloperTools = await getToolGroups(this.#page);
       if (thirdPartyDeveloperTools) {
         this.#page.thirdPartyDeveloperTools = thirdPartyDeveloperTools;
       }
@@ -582,14 +624,23 @@ export class McpResponse implements Response {
 
     let consoleMessages: Array<ConsoleFormatter | IssueFormatter> | undefined;
     if (this.#consoleDataOptions?.include) {
-      if (!this.#page) {
-        throw new Error(`Response must have an McpPage`);
+      let messages;
+      let page: McpPage | undefined;
+
+      if (this.#consoleDataOptions.serviceWorkerId) {
+        messages = context.getServiceWorkerConsoleData(
+          this.#consoleDataOptions.serviceWorkerId,
+        );
+      } else {
+        page = this.#page;
+        if (!page) {
+          throw new Error(`Response must have an McpPage`);
+        }
+        messages = context.getConsoleData(
+          page,
+          this.#consoleDataOptions.includePreservedMessages,
+        );
       }
-      const page = this.#page;
-      let messages = context.getConsoleData(
-        this.#page,
-        this.#consoleDataOptions.includePreservedMessages,
-      );
 
       if (this.#consoleDataOptions.types?.length) {
         const normalizedTypes = new Set(this.#consoleDataOptions.types);
@@ -612,7 +663,9 @@ export class McpResponse implements Response {
                 context.getConsoleMessageStableId(item);
               if ('args' in item || item instanceof UncaughtError) {
                 const consoleMessage = item as ConsoleMessage | UncaughtError;
-                const devTools = context.getDevToolsUniverse(page);
+                const devTools = page
+                  ? context.getDevToolsUniverse(page)
+                  : null;
                 return await ConsoleFormatter.from(consoleMessage, {
                   id: consoleMessageStableId,
                   fetchDetailedData: false,
@@ -674,20 +727,25 @@ export class McpResponse implements Response {
       }
     }
 
-    return this.format(toolName, context, {
-      detailedConsoleMessage,
-      consoleMessages,
-      snapshot,
-      detailedNetworkRequest,
-      networkRequests,
-      traceInsight: this.#attachedTraceInsight,
-      traceSummary: this.#attachedTraceSummary,
-      extensions,
-      lighthouseResult: this.#attachedLighthouseResult,
-      thirdPartyDeveloperTools,
-      webmcpTools,
-      errorMessage: this.#error?.message,
-    });
+    return this.format(
+      toolName,
+      context,
+      {
+        detailedConsoleMessage,
+        consoleMessages,
+        snapshot,
+        detailedNetworkRequest,
+        networkRequests,
+        traceInsight: this.#attachedTraceInsight,
+        traceSummary: this.#attachedTraceSummary,
+        extensions,
+        lighthouseResult: this.#attachedLighthouseResult,
+        thirdPartyDeveloperTools,
+        webmcpTools,
+        errorMessage: this.#error?.message,
+      },
+      useToon,
+    );
   }
 
   format(
@@ -703,10 +761,11 @@ export class McpResponse implements Response {
       traceInsight?: TraceInsightData;
       extensions?: Map<string, Extension>;
       lighthouseResult?: LighthouseData;
-      thirdPartyDeveloperTools?: ToolGroup<ToolDefinition> | null;
+      thirdPartyDeveloperTools: ToolGroups;
       webmcpTools?: WebMCPTool[];
       errorMessage?: string;
     },
+    useToon: boolean,
   ): {content: Array<TextContent | ImageContent>; structuredContent: object} {
     const structuredContent: {
       snapshot?: object;
@@ -720,7 +779,7 @@ export class McpResponse implements Response {
       traceInsights?: Array<{insightName: string; insightKey: string}>;
       lighthouseResult?: object;
       extensions?: object[];
-      thirdPartyDeveloperTools?: object;
+      thirdPartyDeveloperTools?: object[];
       webmcpTools?: object[];
       message?: string;
       networkConditions?: string;
@@ -898,7 +957,7 @@ Call ${handleDialog.name} to handle it before continuing.`);
     }
 
     if (data.traceSummary) {
-      const summary = getTraceSummary(data.traceSummary);
+      const summary = getTraceSummary(data.traceSummary, this.#deviceScope);
       response.push(summary);
       structuredContent.traceSummary = summary;
       structuredContent.traceInsights = [];
@@ -917,6 +976,7 @@ Call ${handleDialog.name} to handle it before continuing.`);
         data.traceInsight.trace,
         data.traceInsight.insightSetId,
         data.traceInsight.insightName,
+        this.#deviceScope,
       );
       if ('error' in insightOutput) {
         response.push(insightOutput.error);
@@ -953,9 +1013,13 @@ Call ${handleDialog.name} to handle it before continuing.`);
         response.push(`Saved snapshot to ${data.snapshot}.`);
         structuredContent.snapshotFilePath = data.snapshot;
       } else {
-        response.push('## Latest page snapshot');
-        response.push(data.snapshot.toString());
         structuredContent.snapshot = data.snapshot.toJSON();
+        response.push('## Latest page snapshot');
+        response.push(
+          useToon
+            ? toonEncode(structuredContent.snapshot)
+            : data.snapshot.toString(),
+        );
       }
     }
 
@@ -988,8 +1052,12 @@ Call ${handleDialog.name} to handle it before continuing.`);
         const paginatedRecord = Object.fromEntries(paginationData.items);
         const formatter = new HeapSnapshotFormatter(paginatedRecord);
 
-        response.push(formatter.toString());
         structuredContent.heapSnapshotData = formatter.toJSON();
+        response.push(
+          useToon
+            ? toonEncode(structuredContent.heapSnapshotData)
+            : formatter.toString(),
+        );
       }
       const nodes = this.#heapSnapshotOptions.nodes;
       if (nodes) {
@@ -1047,19 +1115,11 @@ Call ${handleDialog.name} to handle it before continuing.`);
       }
     }
 
-    if (data.thirdPartyDeveloperTools !== undefined) {
-      if (data.thirdPartyDeveloperTools) {
-        structuredContent.thirdPartyDeveloperTools =
-          data.thirdPartyDeveloperTools;
-      }
+    if (data.thirdPartyDeveloperTools.length) {
+      structuredContent.thirdPartyDeveloperTools =
+        data.thirdPartyDeveloperTools;
       response.push('## Third-party developer tools');
-      if (
-        data.thirdPartyDeveloperTools === null ||
-        !data.thirdPartyDeveloperTools?.tools
-      ) {
-        response.push('No third-party developer tools available.');
-      } else {
-        const toolGroup = data.thirdPartyDeveloperTools;
+      for (const toolGroup of data.thirdPartyDeveloperTools) {
         response.push(`${toolGroup.name}: ${toolGroup.description}`);
         response.push('Available tools:');
         const toolDefinitionsMessage = toolGroup.tools
@@ -1109,11 +1169,14 @@ Call ${handleDialog.name} to handle it before continuing.`);
         structuredContent.pagination = paginationData.pagination;
         response.push(...paginationData.info);
         if (data.networkRequests) {
-          structuredContent.networkRequests = [];
-          for (const formatter of paginationData.items) {
-            response.push(formatter.toString());
-            structuredContent.networkRequests.push(formatter.toJSON());
-          }
+          structuredContent.networkRequests = paginationData.items.map(i =>
+            i.toJSON(),
+          );
+          response.push(
+            ...(useToon
+              ? [toonEncode(structuredContent.networkRequests)]
+              : paginationData.items.map(i => i.toString())),
+          );
         }
       } else {
         response.push('No requests found.');
@@ -1131,11 +1194,15 @@ Call ${handleDialog.name} to handle it before continuing.`);
           this.#consoleDataOptions.pagination,
         );
         structuredContent.pagination = paginationData.pagination;
-        response.push(...paginationData.info);
-        response.push(...paginationData.items.map(item => item.toString()));
         structuredContent.consoleMessages = paginationData.items.map(item =>
           item.toJSON(),
         );
+        response.push(...paginationData.info);
+        if (useToon) {
+          response.push(toonEncode(structuredContent.consoleMessages));
+        } else {
+          response.push(...paginationData.items.map(item => item.toString()));
+        }
       } else {
         response.push('<no console messages found>');
       }

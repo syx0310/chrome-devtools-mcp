@@ -5,6 +5,9 @@
  */
 
 import {execSync} from 'node:child_process';
+import {readFileSync} from 'node:fs';
+
+const packageName = JSON.parse(readFileSync('package.json', 'utf8')).name;
 
 // Checks that the select build files are present using `npm publish --dry-run`.
 function verifyPackageContents() {
@@ -13,8 +16,17 @@ function verifyPackageContents() {
       encoding: 'utf8',
     });
     // skip non-JSON output from prepare.
-    const data = JSON.parse(output.substring(output.indexOf('{')));
-    const files = data['chrome-devtools-mcp'].files.map(f => f.path);
+    const jsonStart = output.search(/[[{]/);
+    const data = JSON.parse(output.substring(jsonStart));
+    const packageData = Array.isArray(data)
+      ? (data.find(entry => entry.name === packageName) ?? data[0])
+      : data.files
+        ? data
+        : (data[packageName] ?? data['chrome-devtools-mcp']);
+    if (!packageData.files) {
+      throw new Error('npm publish output did not include files');
+    }
+    const files = packageData.files.map(f => f.path);
     // Check some important files.
     const requiredPaths = [
       'build/src/index.js',

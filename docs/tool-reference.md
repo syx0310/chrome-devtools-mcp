@@ -39,8 +39,9 @@
   - [`take_snapshot`](#take_snapshot)
   - [`screencast_start`](#screencast_start)
   - [`screencast_stop`](#screencast_stop)
-- **[Memory](#memory)** (5 tools)
+- **[Memory](#memory)** (6 tools)
   - [`take_heapsnapshot`](#take_heapsnapshot)
+  - [`close_heapsnapshot`](#close_heapsnapshot)
   - [`get_heapsnapshot_class_nodes`](#get_heapsnapshot_class_nodes)
   - [`get_heapsnapshot_details`](#get_heapsnapshot_details)
   - [`get_heapsnapshot_retainers`](#get_heapsnapshot_retainers)
@@ -393,6 +394,7 @@ so returned values have to be JSON-serializable.
 - **includePreservedMessages** (boolean) _(optional)_: Set to true to return the preserved messages over the last 3 navigations.
 - **pageIdx** (integer) _(optional)_: Page number to return (0-based). When omitted, returns the first page.
 - **pageSize** (integer) _(optional)_: Maximum number of messages to return. When omitted, returns all messages.
+- **serviceWorkerId** (string) _(optional)_: Filter messages to only return messages of the specified service worker.
 - **types** (array) _(optional)_: Filter messages to only return messages of the specified resource types. When omitted or empty, returns all messages.
 
 ---
@@ -454,9 +456,19 @@ in the DevTools Elements panel (if any).
 
 ---
 
+### `close_heapsnapshot`
+
+**Description:** Closes a previously loaded memory heapsnapshot, freeing its memory. (requires flag: --memoryDebugging=true)
+
+**Parameters:**
+
+- **filePath** (string) **(required)**: A path to the .heapsnapshot file to close.
+
+---
+
 ### `get_heapsnapshot_class_nodes`
 
-**Description:** Loads a memory heapsnapshot and returns instances of a specific class with their IDs. (requires flag: --experimentalMemory=true)
+**Description:** Loads a memory heapsnapshot and returns instances of a specific class with their IDs. (requires flag: --memoryDebugging=true)
 
 **Parameters:**
 
@@ -469,7 +481,7 @@ in the DevTools Elements panel (if any).
 
 ### `get_heapsnapshot_details`
 
-**Description:** Loads a memory heapsnapshot and returns all available information including statistics, static data, and aggregated node information. Supports pagination for aggregates. (requires flag: --experimentalMemory=true)
+**Description:** Loads a memory heapsnapshot and returns all available information including statistics, static data, and aggregated node information. Supports pagination for aggregates. (requires flag: --memoryDebugging=true)
 
 **Parameters:**
 
@@ -481,7 +493,7 @@ in the DevTools Elements panel (if any).
 
 ### `get_heapsnapshot_retainers`
 
-**Description:** Loads a memory heapsnapshot and returns retainers for a specific node ID. (requires flag: --experimentalMemory=true)
+**Description:** Loads a memory heapsnapshot and returns retainers for a specific node ID. (requires flag: --memoryDebugging=true)
 
 **Parameters:**
 
@@ -494,7 +506,7 @@ in the DevTools Elements panel (if any).
 
 ### `get_heapsnapshot_summary`
 
-**Description:** Loads a memory heapsnapshot and returns snapshot summary stats. (requires flag: --experimentalMemory=true)
+**Description:** Loads a memory heapsnapshot and returns snapshot summary stats. (requires flag: --memoryDebugging=true)
 
 **Parameters:**
 

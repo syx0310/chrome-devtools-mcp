@@ -69,7 +69,7 @@ export async function createMcpServer(
       );
       context?.setRoots(roots.roots);
     } catch (e) {
-      logger('Failed to list roots', e);
+      logger?.('Failed to list roots', e);
     }
   };
 
@@ -99,6 +99,13 @@ export async function createMcpServer(
       chromeArgs.push(`--proxy-server=${serverArgs.proxyServer}`);
     }
     const devtools = serverArgs.experimentalDevtools ?? false;
+    const blocklist = serverArgs.blockedUrlPattern
+      ? serverArgs.blockedUrlPattern.map(String)
+      : undefined;
+    const allowlist = serverArgs.allowedUrlPattern
+      ? serverArgs.allowedUrlPattern.map(String)
+      : undefined;
+
     const browser =
       serverArgs.browserUrl || serverArgs.wsEndpoint || serverArgs.autoConnect
         ? await ensureBrowserConnected({
@@ -111,6 +118,8 @@ export async function createMcpServer(
               : undefined,
             userDataDir: serverArgs.userDataDir,
             devtools,
+            blocklist,
+            allowlist,
           })
         : await ensureBrowserLaunched({
             headless: serverArgs.headless,
@@ -128,6 +137,8 @@ export async function createMcpServer(
             viaCli: serverArgs.viaCli,
             stealth: serverArgs.stealth,
             antiDevtoolsDetection: serverArgs.antiDevtoolsDetection,
+            blocklist,
+            allowlist,
           });
 
     if (context?.browser !== browser) {
@@ -137,6 +148,10 @@ export async function createMcpServer(
         performanceCrux: serverArgs.performanceCrux,
         stealth: serverArgs.stealth,
         antiDevtoolsDetection: serverArgs.antiDevtoolsDetection,
+        hasNetworkBlockOrAllowlist: Boolean(
+          (blocklist && blocklist.length > 0) ||
+          (allowlist && allowlist.length > 0),
+        ),
       });
       await updateRoots();
     }

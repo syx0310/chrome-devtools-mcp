@@ -22,9 +22,9 @@ export const installExtension = defineTool({
       .describe('Absolute path to the unpacked extension folder.'),
   },
   blockedByDialog: false,
+  verifyFilesSchema: ['path'],
   handler: async (request, response, context) => {
     const {path} = request.params;
-    await context.validatePath(path);
     const id = await context.installExtension(path);
     response.appendResponseLine(`Extension installed. Id: ${id}`);
   },
@@ -41,6 +41,7 @@ export const uninstallExtension = defineTool({
     id: zod.string().describe('ID of the extension to uninstall.'),
   },
   blockedByDialog: false,
+  verifyFilesSchema: [],
   handler: async (request, response, context) => {
     const {id} = request.params;
     await context.uninstallExtension(id);
@@ -58,6 +59,7 @@ export const listExtensions = defineTool({
   },
   schema: {},
   blockedByDialog: false,
+  verifyFilesSchema: [],
   handler: async (_request, response, _context) => {
     response.setListExtensions();
   },
@@ -74,13 +76,13 @@ export const reloadExtension = defineTool({
     id: zod.string().describe('ID of the extension to reload.'),
   },
   blockedByDialog: false,
+  verifyFilesSchema: [],
   handler: async (request, response, context) => {
     const {id} = request.params;
     const extension = await context.getExtension(id);
     if (!extension) {
       throw new Error(`Extension with ID ${id} not found.`);
     }
-    await context.validatePath(extension.path);
     await context.installExtension(extension.path);
     response.appendResponseLine('Extension reloaded.');
   },
@@ -97,6 +99,7 @@ export const triggerExtensionAction = defineTool({
     id: zod.string().describe('ID of the extension to trigger the action for.'),
   },
   blockedByDialog: false,
+  verifyFilesSchema: [],
   handler: async (request, response, context) => {
     const {id} = request.params;
     await context.triggerExtensionAction(id);

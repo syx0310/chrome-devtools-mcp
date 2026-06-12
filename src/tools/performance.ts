@@ -48,8 +48,8 @@ export const startTrace = definePageTool({
     filePath: filePathSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: ['filePath'],
   handler: async (request, response, context) => {
-    await context.validatePath(request.params.filePath);
     if (context.isRunningPerformanceTrace()) {
       response.appendResponseLine(
         'Error: a performance trace is already running. Use performance_stop_trace to stop it. Only one trace can be running at any given time.',
@@ -127,8 +127,8 @@ export const stopTrace = definePageTool({
     filePath: filePathSchema,
   },
   blockedByDialog: true,
+  verifyFilesSchema: ['filePath'],
   handler: async (request, response, context) => {
-    await context.validatePath(request.params.filePath);
     if (!context.isRunningPerformanceTrace()) {
       return;
     }
@@ -163,6 +163,7 @@ export const analyzeInsight = definePageTool({
       ),
   },
   blockedByDialog: false,
+  verifyFilesSchema: [],
   handler: async (request, response, context) => {
     const lastRecording = context.recordedTraces().at(-1);
     if (!lastRecording) {
@@ -233,8 +234,8 @@ async function stopTracingAndAppendOutput(
 
 /** We tell CrUXManager to fetch data so it's available when DevTools.PerformanceTraceFormatter is invoked */
 async function populateCruxData(result: TraceResult): Promise<void> {
-  logger('populateCruxData called');
-  const cruxManager = DevTools.CrUXManager.instance();
+  logger?.('populateCruxData called');
+  const cruxManager = DevTools.CrUXManager.CrUXManager.instance();
   // go/jtfbx. Yes, we're aware this API key is public. ;)
   cruxManager.setEndpointForTesting(
     'https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=AIzaSyBn5gimNjhiEyA_euicSKko6IlD3HdgUfk',
@@ -253,17 +254,17 @@ async function populateCruxData(result: TraceResult): Promise<void> {
   const urlSet = new Set(urls);
 
   if (urlSet.size === 0) {
-    logger('No URLs found for CrUX data');
+    logger?.('No URLs found for CrUX data');
     return;
   }
 
-  logger(
+  logger?.(
     `Fetching CrUX data for ${urlSet.size} URLs: ${Array.from(urlSet).join(', ')}`,
   );
   const cruxData = await Promise.all(
     Array.from(urlSet).map(async url => {
       const data = await cruxManager.getFieldDataForPage(url);
-      logger(`CrUX data for ${url}: ${data ? 'found' : 'not found'}`);
+      logger?.(`CrUX data for ${url}: ${data ? 'found' : 'not found'}`);
       return data;
     }),
   );

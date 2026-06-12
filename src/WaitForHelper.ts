@@ -135,22 +135,29 @@ export class WaitForHelper {
     if (this.#abortController.signal.aborted) {
       throw new Error("Can't re-use a WaitForHelper");
     }
-    if (options?.handleDialog) {
-      const dialogHandler = (dialog: Pick<Dialog, 'accept' | 'dismiss'>) => {
-        this.#dialogOpened = true;
-        if (options.handleDialog === 'dismiss') {
-          void dialog.dismiss();
-        } else if (options.handleDialog === 'accept') {
-          void dialog.accept();
-        } else {
-          void dialog.accept(options.handleDialog);
-        }
-      };
-      this.#page.on('dialog', dialogHandler);
-      this.#abortController.signal.addEventListener('abort', () => {
-        this.#page.off('dialog', dialogHandler);
-      });
-    }
+    let resolveDialogPromise: (() => void) | undefined;
+    const dialogPromise = new Promise<void>(resolve => {
+      resolveDialogPromise = resolve;
+    });
+    const dialogHandler = (
+      dialog: Pick<Dialog, 'accept' | 'dismiss' | 'type'>,
+    ) => {
+      this.#dialogOpened = true;
+      if (dialog.type() !== 'beforeunload' && resolveDialogPromise) {
+        resolveDialogPromise();
+      }
+      if (options?.handleDialog === 'dismiss') {
+        void dialog.dismiss();
+      } else if (options?.handleDialog === 'accept') {
+        void dialog.accept();
+      } else if (options?.handleDialog) {
+        void dialog.accept(options.handleDialog);
+      }
+    };
+    this.#page.on('dialog', dialogHandler);
+    this.#abortController.signal.addEventListener('abort', () => {
+      this.#page.off('dialog', dialogHandler);
+    });
 
     const navigationFinished = this.waitForNavigationStarted()
       .then(navigationStated => {
@@ -162,10 +169,26 @@ export class WaitForHelper {
         }
         return;
       })
-      .catch(error => logger(error));
+      .catch(error => logger?.(error));
 
+    const actionPromise = action();
     try {
-      await action();
+      if (options?.handleDialog) {
+        await actionPromise;
+      } else {
+        let dialogOpenedDuringAction = false;
+        await Promise.race([
+          actionPromise,
+          dialogPromise.then(() => {
+            dialogOpenedDuringAction = true;
+          }),
+        ]);
+        if (dialogOpenedDuringAction) {
+          actionPromise.catch(error => logger?.(error));
+          this.#abortController.abort();
+          return this.#getResult();
+        }
+      }
     } catch (error) {
       // Clear up pending promises
       this.#abortController.abort();
@@ -183,7 +206,7 @@ export class WaitForHelper {
       // the correct context
       await this.waitForStableDom();
     } catch (error) {
-      logger(error);
+      logger?.(error);
     } finally {
       this.#abortController.abort();
     }
