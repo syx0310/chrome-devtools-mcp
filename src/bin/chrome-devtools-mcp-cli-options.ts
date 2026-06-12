@@ -212,7 +212,7 @@ export const cliOptions = {
     describe: 'Path to ffmpeg executable for screencast recording.',
     implies: 'experimentalScreencast',
   },
-  experimentalWebmcp: {
+  categoryExperimentalWebmcp: {
     type: 'boolean',
     describe:
       'Set to true to enable debugging WebMCP tools. Requires Chrome 149+ with the following flags: `--enable-features=WebMCPTesting,DevToolsWebMCPSupport`',
@@ -249,12 +249,11 @@ export const cliOptions = {
     describe:
       'Set to true to include tools related to extensions. Note: This feature is currently only supported with a pipe connection. autoConnect, browserUrl, and wsEndpoint are not supported with this feature until 149 will be released.',
   },
-  categoryExperimentalInPage: {
+  categoryExperimentalThirdParty: {
     type: 'boolean',
-    hidden: true,
     default: false,
     describe:
-      'Set to true to enable tools exposed by the inspected page itself',
+      'Set to true to enable third-party developer tools exposed by the inspected page itself',
   },
   performanceCrux: {
     type: 'boolean',
@@ -304,7 +303,11 @@ export const cliOptions = {
 
 export type ParsedArguments = ReturnType<typeof parseArguments>;
 
-export function parseArguments(version: string, argv = process.argv) {
+export function parseArguments(
+  version: string,
+  argv = process.argv,
+  env = process.env,
+) {
   const yargsInstance = yargs(hideBin(argv))
     .scriptName('npx chrome-devtools-mcp@latest')
     .options(cliOptions)
@@ -318,6 +321,12 @@ export function parseArguments(version: string, argv = process.argv) {
         !args.executablePath
       ) {
         args.channel = 'stable';
+      }
+      if (env['CI'] || env['CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS']) {
+        console.error(
+          "turning off usage statistics. process.env['CI'] || process.env['CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS'] is set.",
+        );
+        args.usageStatistics = false;
       }
       return true;
     })

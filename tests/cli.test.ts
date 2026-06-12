@@ -19,8 +19,8 @@ describe('cli args parsing', () => {
     categoryNetwork: true,
     'category-extensions': false,
     categoryExtensions: false,
-    'category-experimental-in-page': false,
-    categoryExperimentalInPage: false,
+    'category-experimental-third-party': false,
+    categoryExperimentalThirdParty: false,
     'auto-connect': undefined,
     autoConnect: undefined,
     'performance-crux': true,
@@ -35,7 +35,7 @@ describe('cli args parsing', () => {
   };
 
   it('parses with default args', async () => {
-    const args = parseArguments('1.0.0', ['node', 'main.js']);
+    const args = parseArguments('1.0.0', ['node', 'main.js'], {});
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -46,12 +46,11 @@ describe('cli args parsing', () => {
   });
 
   it('parses with browser url', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--browserUrl',
-      'http://localhost:3000',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--browserUrl', 'http://localhost:3000'],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -64,12 +63,11 @@ describe('cli args parsing', () => {
   });
 
   it('parses with user data dir', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--user-data-dir',
-      '/tmp/chrome-profile',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--user-data-dir', '/tmp/chrome-profile'],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -82,12 +80,11 @@ describe('cli args parsing', () => {
   });
 
   it('parses an empty browser url', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--browserUrl',
-      '',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--browserUrl', ''],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -101,12 +98,11 @@ describe('cli args parsing', () => {
   });
 
   it('parses with executable path', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--executablePath',
-      '/tmp/test 123/chrome',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--executablePath', '/tmp/test 123/chrome'],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -119,12 +115,11 @@ describe('cli args parsing', () => {
   });
 
   it('parses viewport', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--viewport',
-      '888x777',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--viewport', '888x777'],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -139,12 +134,16 @@ describe('cli args parsing', () => {
   });
 
   it('parses chrome args', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      `--chrome-arg='--no-sandbox'`,
-      `--chrome-arg='--disable-setuid-sandbox'`,
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      [
+        'node',
+        'main.js',
+        `--chrome-arg='--no-sandbox'`,
+        `--chrome-arg='--disable-setuid-sandbox'`,
+      ],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -157,12 +156,16 @@ describe('cli args parsing', () => {
   });
 
   it('parses ignore chrome args', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      `--ignore-default-chrome-arg='--disable-extensions'`,
-      `--ignore-default-chrome-arg='--disable-cancel-all-touches'`,
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      [
+        'node',
+        'main.js',
+        `--ignore-default-chrome-arg='--disable-extensions'`,
+        `--ignore-default-chrome-arg='--disable-cancel-all-touches'`,
+      ],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -181,12 +184,16 @@ describe('cli args parsing', () => {
   });
 
   it('parses wsEndpoint with ws:// protocol', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--wsEndpoint',
-      'ws://127.0.0.1:9222/devtools/browser/abc123',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      [
+        'node',
+        'main.js',
+        '--wsEndpoint',
+        'ws://127.0.0.1:9222/devtools/browser/abc123',
+      ],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -199,12 +206,16 @@ describe('cli args parsing', () => {
   });
 
   it('parses wsEndpoint with wss:// protocol', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--wsEndpoint',
-      'wss://example.com:9222/devtools/browser/abc123',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      [
+        'node',
+        'main.js',
+        '--wsEndpoint',
+        'wss://example.com:9222/devtools/browser/abc123',
+      ],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -217,14 +228,18 @@ describe('cli args parsing', () => {
   });
 
   it('parses wsHeaders with valid JSON', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--wsEndpoint',
-      'ws://127.0.0.1:9222/devtools/browser/abc123',
-      '--wsHeaders',
-      '{"Authorization":"Bearer token","X-Custom":"value"}',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      [
+        'node',
+        'main.js',
+        '--wsEndpoint',
+        'ws://127.0.0.1:9222/devtools/browser/abc123',
+        '--wsHeaders',
+        '{"Authorization":"Bearer token","X-Custom":"value"}',
+      ],
+      {},
+    );
     assert.deepStrictEqual(args.wsHeaders, {
       Authorization: 'Bearer token',
       'X-Custom': 'value',
@@ -232,11 +247,11 @@ describe('cli args parsing', () => {
   });
 
   it('parses disabled category', async () => {
-    const args = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--no-category-emulation',
-    ]);
+    const args = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--no-category-emulation'],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -248,7 +263,11 @@ describe('cli args parsing', () => {
     });
   });
   it('parses auto-connect', async () => {
-    const args = parseArguments('1.0.0', ['node', 'main.js', '--auto-connect']);
+    const args = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--auto-connect'],
+      {},
+    );
     assert.deepStrictEqual(args, {
       ...defaultArgs,
       _: [],
@@ -262,23 +281,51 @@ describe('cli args parsing', () => {
 
   it('parses usage statistics flag', async () => {
     // Test default (should be false).
-    const defaultArgs = parseArguments('1.0.0', ['node', 'main.js']);
+    const defaultArgs = parseArguments('1.0.0', ['node', 'main.js'], {});
     assert.strictEqual(defaultArgs.usageStatistics, false);
 
     // Test enabling it
-    const enabledArgs = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--usage-statistics',
-    ]);
+    const enabledArgs = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--usage-statistics'],
+      {},
+    );
     assert.strictEqual(enabledArgs.usageStatistics, true);
 
     // Test disabling it
-    const disabledArgs = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--no-usage-statistics',
-    ]);
+    const disabledArgs = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--no-usage-statistics'],
+      {},
+    );
+    assert.strictEqual(disabledArgs.usageStatistics, false);
+  });
+
+  it('respects env variable', async () => {
+    // Test default (should be true).
+    const defaultArgs = parseArguments('1.0.0', ['node', 'main.js'], {
+      CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: 'true',
+    });
+    assert.strictEqual(defaultArgs.usageStatistics, false);
+
+    // Test enabling it
+    const enabledArgs = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--usage-statistics'],
+      {
+        CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: 'true',
+      },
+    );
+    assert.strictEqual(enabledArgs.usageStatistics, false);
+
+    // Test disabling it
+    const disabledArgs = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--no-usage-statistics'],
+      {
+        CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: 'true',
+      },
+    );
     assert.strictEqual(disabledArgs.usageStatistics, false);
   });
 
@@ -287,18 +334,18 @@ describe('cli args parsing', () => {
     assert.strictEqual(defaultArgs.performanceCrux, true);
 
     // force enable
-    const enabledArgs = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--performance-crux',
-    ]);
+    const enabledArgs = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--performance-crux'],
+      {},
+    );
     assert.strictEqual(enabledArgs.performanceCrux, true);
 
-    const disabledArgs = parseArguments('1.0.0', [
-      'node',
-      'main.js',
-      '--no-performance-crux',
-    ]);
+    const disabledArgs = parseArguments(
+      '1.0.0',
+      ['node', 'main.js', '--no-performance-crux'],
+      {},
+    );
     assert.strictEqual(disabledArgs.performanceCrux, false);
   });
 

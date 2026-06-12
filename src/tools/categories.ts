@@ -12,8 +12,9 @@ export enum ToolCategory {
   NETWORK = 'network',
   DEBUGGING = 'debugging',
   EXTENSIONS = 'extensions',
-  IN_PAGE = 'experimentalInPage',
+  THIRD_PARTY = 'experimentalThirdParty',
   MEMORY = 'memory',
+  WEBMCP = 'experimentalWebmcp',
 }
 
 export const labels = {
@@ -24,11 +25,13 @@ export const labels = {
   [ToolCategory.NETWORK]: 'Network',
   [ToolCategory.DEBUGGING]: 'Debugging',
   [ToolCategory.EXTENSIONS]: 'Extensions',
-  [ToolCategory.IN_PAGE]: 'In-page tools',
+  [ToolCategory.THIRD_PARTY]: 'Third-party',
   [ToolCategory.MEMORY]: 'Memory',
+  [ToolCategory.WEBMCP]: 'WebMCP',
 };
 
 export const OFF_BY_DEFAULT_CATEGORIES = [
   ToolCategory.EXTENSIONS,
-  ToolCategory.IN_PAGE,
+  ToolCategory.THIRD_PARTY,
+  ToolCategory.WEBMCP,
 ];

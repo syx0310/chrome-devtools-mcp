@@ -40,6 +40,7 @@ describe('e2e', () => {
         executablePath(),
         ...extraArgs,
       ],
+      env: {...process.env, CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: 'true'},
     });
     const client = new Client(
       {
@@ -107,16 +108,16 @@ describe('e2e', () => {
     });
   });
 
-  it('has experimental in-Page tools', async () => {
+  it('has experimental third-party developer tools', async () => {
     await withClient(
       async client => {
         const {tools} = await client.listTools();
-        const listInPageTools = tools.find(
-          t => t.name === 'list_in_page_tools',
+        const listThirdPartyDeveloperTools = tools.find(
+          t => t.name === 'list_3p_developer_tools',
         );
-        assert.ok(listInPageTools);
+        assert.ok(listThirdPartyDeveloperTools);
       },
-      ['--category-experimental-in-page'],
+      ['--category-experimental-third-party'],
     );
   });
 
@@ -166,7 +167,7 @@ describe('e2e', () => {
         assert.ok(listWebMcpTools);
         assert.ok(executeWebMcpTool);
       },
-      ['--experimental-webmcp'],
+      ['--categoryExperimentalWebmcp'],
     );
   });
 

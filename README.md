@@ -477,7 +477,7 @@ If you run into any issues, checkout our [troubleshooting guide](./docs/troubles
 
 <!-- BEGIN AUTO GENERATED TOOLS -->
 
-- **Input automation** (9 tools)
+- **Input automation** (10 tools)
   - [`click`](docs/tool-reference.md#click)
   - [`drag`](docs/tool-reference.md#drag)
   - [`fill`](docs/tool-reference.md#fill)
@@ -487,6 +487,7 @@ If you run into any issues, checkout our [troubleshooting guide](./docs/troubles
   - [`press_key`](docs/tool-reference.md#press_key)
   - [`type_text`](docs/tool-reference.md#type_text)
   - [`upload_file`](docs/tool-reference.md#upload_file)
+  - [`click_at`](docs/tool-reference.md#click_at)
 - **Navigation automation** (6 tools)
   - [`close_page`](docs/tool-reference.md#close_page)
   - [`list_pages`](docs/tool-reference.md#list_pages)
@@ -504,21 +505,32 @@ If you run into any issues, checkout our [troubleshooting guide](./docs/troubles
 - **Network** (2 tools)
   - [`get_network_request`](docs/tool-reference.md#get_network_request)
   - [`list_network_requests`](docs/tool-reference.md#list_network_requests)
-- **Debugging** (6 tools)
+- **Debugging** (8 tools)
   - [`evaluate_script`](docs/tool-reference.md#evaluate_script)
   - [`get_console_message`](docs/tool-reference.md#get_console_message)
   - [`lighthouse_audit`](docs/tool-reference.md#lighthouse_audit)
   - [`list_console_messages`](docs/tool-reference.md#list_console_messages)
   - [`take_screenshot`](docs/tool-reference.md#take_screenshot)
   - [`take_snapshot`](docs/tool-reference.md#take_snapshot)
+  - [`screencast_start`](docs/tool-reference.md#screencast_start)
+  - [`screencast_stop`](docs/tool-reference.md#screencast_stop)
+- **Memory** (4 tools)
+  - [`take_memory_snapshot`](docs/tool-reference.md#take_memory_snapshot)
+  - [`get_memory_snapshot_details`](docs/tool-reference.md#get_memory_snapshot_details)
+  - [`get_nodes_by_class`](docs/tool-reference.md#get_nodes_by_class)
+  - [`load_memory_snapshot`](docs/tool-reference.md#load_memory_snapshot)
 - **Extensions** (5 tools)
   - [`install_extension`](docs/tool-reference.md#install_extension)
   - [`list_extensions`](docs/tool-reference.md#list_extensions)
   - [`reload_extension`](docs/tool-reference.md#reload_extension)
   - [`trigger_extension_action`](docs/tool-reference.md#trigger_extension_action)
   - [`uninstall_extension`](docs/tool-reference.md#uninstall_extension)
-- **Memory** (1 tools)
-  - [`take_memory_snapshot`](docs/tool-reference.md#take_memory_snapshot)
+- **Third-party** (2 tools)
+  - [`execute_3p_developer_tool`](docs/tool-reference.md#execute_3p_developer_tool)
+  - [`list_3p_developer_tools`](docs/tool-reference.md#list_3p_developer_tools)
+- **WebMCP** (2 tools)
+  - [`execute_webmcp_tool`](docs/tool-reference.md#execute_webmcp_tool)
+  - [`list_webmcp_tools`](docs/tool-reference.md#list_webmcp_tools)
 
 <!-- END AUTO GENERATED TOOLS -->
 
@@ -605,7 +617,7 @@ The Chrome DevTools MCP server supports the following configuration option:
   Path to ffmpeg executable for screencast recording.
   - **Type:** string
 
-- **`--experimentalWebmcp`/ `--experimental-webmcp`**
+- **`--categoryExperimentalWebmcp`/ `--category-experimental-webmcp`**
   Set to true to enable debugging WebMCP tools. Requires Chrome 149+ with the following flags: `--enable-features=WebMCPTesting,DevToolsWebMCPSupport`
   - **Type:** boolean
 
@@ -634,6 +646,11 @@ The Chrome DevTools MCP server supports the following configuration option:
 
 - **`--categoryExtensions`/ `--category-extensions`**
   Set to true to include tools related to extensions. Note: This feature is currently only supported with a pipe connection. autoConnect, browserUrl, and wsEndpoint are not supported with this feature until 149 will be released.
+  - **Type:** boolean
+  - **Default:** `false`
+
+- **`--categoryExperimentalThirdParty`/ `--category-experimental-third-party`**
+  Set to true to enable third-party developer tools exposed by the inspected page itself
   - **Type:** boolean
   - **Default:** `false`
 

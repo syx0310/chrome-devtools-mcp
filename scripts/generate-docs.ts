@@ -6,10 +6,7 @@
 
 import fs from 'node:fs';
 
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
-import {get_encoding} from 'tiktoken';
 
 import {cliOptions} from '../build/src/bin/chrome-devtools-mcp-cli-options.js';
 import type {ParsedArguments} from '../build/src/bin/chrome-devtools-mcp-cli-options.js';
@@ -24,42 +21,6 @@ import {createTools} from '../build/src/tools/tools.js';
 const OUTPUT_PATH = './docs/tool-reference.md';
 const SLIM_OUTPUT_PATH = './docs/slim-tool-reference.md';
 const README_PATH = './README.md';
-
-async function measureServer(args: string[]) {
-  // 1. Connect to your actual MCP server
-  const transport = new StdioClientTransport({
-    command: 'node',
-    args: ['./build/src/bin/chrome-devtools-mcp.js', ...args], // Point to your built MCP server
-  });
-
-  const client = new Client(
-    {name: 'measurer', version: '1.0.0'},
-    {capabilities: {}},
-  );
-  await client.connect(transport);
-
-  // 2. Fetch all tools
-  const toolsList = await client.listTools();
-
-  // 3. Serialize exactly how an LLM would see it (JSON)
-  const jsonString = JSON.stringify(toolsList.tools, null, 2);
-
-  // 4. Count tokens (using cl100k_base which is standard for GPT-4/Claude-3.5 approximation)
-  const enc = get_encoding('cl100k_base');
-  const tokenCount = enc.encode(jsonString).length;
-
-  console.log(`--- Measurement Results ---`);
-  console.log(`Total Tools: ${toolsList.tools.length}`);
-  console.log(`JSON Character Count: ${jsonString.length}`);
-  console.log(`Estimated Token Count: ~${tokenCount}`);
-
-  // Clean up
-  enc.free();
-  await client.close();
-  return {
-    tokenCount,
-  };
-}
 
 // Extend the MCP Tool type to include our annotations
 interface ToolWithAnnotations extends Tool {
@@ -131,6 +92,20 @@ function addCrossLinks(text: string, tools: ToolWithAnnotations[]): string {
   return result;
 }
 
+function sortTools(a: ToolWithAnnotations, b: ToolWithAnnotations): number {
+  const aHasConditions = Boolean(a.annotations?.conditions?.length > 0);
+  const bHasConditions = Boolean(b.annotations?.conditions?.length > 0);
+
+  if (aHasConditions && !bHasConditions) {
+    return 1;
+  }
+  if (!aHasConditions && bHasConditions) {
+    return -1;
+  }
+
+  return a.name.localeCompare(b.name);
+}
+
 function generateToolsTOC(
   categories: Record<string, ToolWithAnnotations[]>,
   sortedCategories: string[],
@@ -143,7 +118,7 @@ function generateToolsTOC(
     toc += `- **${categoryName}** (${categoryTools.length} tools)\n`;
 
     // Sort tools within category for TOC
-    categoryTools.sort((a: Tool, b: Tool) => a.name.localeCompare(b.name));
+    categoryTools.sort(sortTools);
     for (const tool of categoryTools) {
       const anchorLink = tool.name.toLowerCase();
       toc += `  - [\`${tool.name}\`](docs/tool-reference.md#${anchorLink})\n`;
@@ -323,14 +298,13 @@ async function generateReference(
   toolsWithAnnotations: ToolWithAnnotations[],
   categories: Record<string, ToolWithAnnotations[]>,
   sortedCategories: string[],
-  serverArgs: string[],
 ) {
   console.log(`Found ${toolsWithAnnotations.length} tools`);
 
   // Generate markdown documentation
   let markdown = `<!-- AUTO GENERATED DO NOT EDIT - run 'npm run gen' to update-->
 
-# ${title} (~${(await measureServer(serverArgs)).tokenCount} cl100k_base tokens)
+# ${title}
 
 `;
   // Generate table of contents
@@ -341,7 +315,7 @@ async function generateReference(
     markdown += `- **[${categoryName}](#${anchorName})** (${categoryTools.length} tools)\n`;
 
     // Sort tools within category for TOC
-    categoryTools.sort((a: Tool, b: Tool) => a.name.localeCompare(b.name));
+    categoryTools.sort(sortTools);
     for (const tool of categoryTools) {
       // Generate proper markdown anchor link: backticks are removed, keep underscores, lowercase
       const anchorLink = tool.name.toLowerCase();
@@ -359,11 +333,11 @@ async function generateReference(
     if (OFF_BY_DEFAULT_CATEGORIES.includes(category)) {
       const flagName = `--${buildFlag(category)}`;
 
-      markdown += `> NOTE: ${categoryName} are not active by default. Use the '${flagName}' flag\n\n`;
+      markdown += `> NOTE: The ${categoryName} category is not active by default. Use the '${flagName}' flag.\n\n`;
     }
 
     // Sort tools within category
-    categoryTools.sort((a: Tool, b: Tool) => a.name.localeCompare(b.name));
+    categoryTools.sort(sortTools);
 
     for (const tool of categoryTools) {
       markdown += `### \`${tool.name}\`\n\n`;
@@ -371,6 +345,23 @@ async function generateReference(
       if (tool.description) {
         // Escape HTML tags but preserve JS function syntax
         let escapedDescription = escapeHtmlTags(tool.description);
+
+        const requiredFlags: string[] = [];
+
+        const isOffByDefault = OFF_BY_DEFAULT_CATEGORIES.includes(category);
+        if (isOffByDefault) {
+          const categoryFlag = buildFlag(category);
+          requiredFlags.push(`--${categoryFlag}=true`);
+        }
+
+        const conditions = tool.annotations?.conditions || [];
+        for (const condition of conditions) {
+          requiredFlags.push(`--${condition}=true`);
+        }
+
+        if (requiredFlags.length > 0) {
+          escapedDescription += ` (requires flag: ${requiredFlags.join(', ')})`;
+        }
 
         // Add cross-links to mentioned tools
         escapedDescription = addCrossLinks(
@@ -448,16 +439,17 @@ function getToolsAndCategories(tools: any) {
   const toolsWithAnnotations: ToolWithAnnotations[] = tools
     .filter(tool => {
       // Skipping in_page tools as they are not launched yet
-      if (tool.annotations.category.includes('experimental')) {
+      if (tool.annotations.category === ToolCategory.IN_PAGE) {
         return false;
       }
 
-      if (!tool.annotations.conditions) {
-        return true;
+      // Skipping internal interop tools not meant for public documentation
+      const skipTools = ['get_tab_id'];
+      if (skipTools.includes(tool.name)) {
+        return false;
       }
 
-      // Only include unconditional tools.
-      return tool.annotations.conditions.length === 0;
+      return true;
     })
     .map(tool => {
       const properties: Record<string, TypeInfo> = {};
@@ -497,8 +489,16 @@ function getToolsAndCategories(tools: any) {
   // Sort categories using the enum order
   const categoryOrder = Object.values(ToolCategory);
   const sortedCategories = Object.keys(categories).sort((a, b) => {
-    const aIndex = categoryOrder.indexOf(a);
-    const bIndex = categoryOrder.indexOf(b);
+    const aOff = OFF_BY_DEFAULT_CATEGORIES.includes(a as ToolCategory);
+    const bOff = OFF_BY_DEFAULT_CATEGORIES.includes(b as ToolCategory);
+
+    if (aOff !== bOff) {
+      return aOff ? 1 : -1;
+    }
+
+    const aIndex = categoryOrder.indexOf(a as ToolCategory);
+    const bIndex = categoryOrder.indexOf(b as ToolCategory);
+
     // Put known categories first, unknown categories last
     if (aIndex === -1 && bIndex === -1) {
       return a.localeCompare(b);
@@ -527,7 +527,6 @@ async function generateToolDocumentation(): Promise<void> {
         toolsWithAnnotations,
         categories,
         sortedCategories,
-        [],
       );
 
       // Generate tools TOC and update README
@@ -544,7 +543,6 @@ async function generateToolDocumentation(): Promise<void> {
         toolsWithAnnotations,
         categories,
         sortedCategories,
-        ['--slim'],
       );
     }
 
