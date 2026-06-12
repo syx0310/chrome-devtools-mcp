@@ -2,7 +2,7 @@
 
 [![npm chrome-devtools-mcp package](https://img.shields.io/npm/v/chrome-devtools-mcp.svg)](https://npmjs.org/package/chrome-devtools-mcp)
 
-Chrome DevTools for agents (`chrome-devtools-mcp`) lets your coding agent (such as Gemini, Claude, Cursor or Copilot)
+Chrome DevTools for agents (`chrome-devtools-mcp`) lets your coding agent (such as Antigravity, Claude, Cursor or Copilot)
 control and inspect a live Chrome browser. It acts as a Model-Context-Protocol
 (MCP) server, giving your AI coding assistant access to the full power of
 Chrome DevTools for reliable automation, in-depth debugging, and performance analysis.
@@ -249,7 +249,7 @@ and the expert guidance it needs to use them effectively.
 
 1.  Open the **Command Palette** (`Cmd+Shift+P` on macOS or `Ctrl+Shift+P` on Windows/Linux).
 2.  Search for and run the **Chat: Install Plugin From Source** command.
-3.  Paste in our repository URL: `https://github.com/ChromeDevTools/chrome-devtools-mcp`
+3.  Paste in our repository name: `ChromeDevTools/chrome-devtools-mcp`.
 
 That's it! Your agent is now supercharged with Chrome DevTools capabilities.
 
@@ -515,11 +515,11 @@ If you run into any issues, checkout our [troubleshooting guide](./docs/troubles
   - [`screencast_start`](docs/tool-reference.md#screencast_start)
   - [`screencast_stop`](docs/tool-reference.md#screencast_stop)
 - **Memory** (5 tools)
-  - [`take_memory_snapshot`](docs/tool-reference.md#take_memory_snapshot)
-  - [`get_memory_snapshot_details`](docs/tool-reference.md#get_memory_snapshot_details)
-  - [`get_node_retainers`](docs/tool-reference.md#get_node_retainers)
-  - [`get_nodes_by_class`](docs/tool-reference.md#get_nodes_by_class)
-  - [`load_memory_snapshot`](docs/tool-reference.md#load_memory_snapshot)
+  - [`take_heapsnapshot`](docs/tool-reference.md#take_heapsnapshot)
+  - [`get_heapsnapshot_class_nodes`](docs/tool-reference.md#get_heapsnapshot_class_nodes)
+  - [`get_heapsnapshot_details`](docs/tool-reference.md#get_heapsnapshot_details)
+  - [`get_heapsnapshot_retainers`](docs/tool-reference.md#get_heapsnapshot_retainers)
+  - [`get_heapsnapshot_summary`](docs/tool-reference.md#get_heapsnapshot_summary)
 - **Extensions** (5 tools)
   - [`install_extension`](docs/tool-reference.md#install_extension)
   - [`list_extensions`](docs/tool-reference.md#list_extensions)

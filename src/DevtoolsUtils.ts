@@ -9,6 +9,7 @@ import {Mutex} from './Mutex.js';
 import {DevTools} from './third_party/index.js';
 import type {
   Browser,
+  CDPSession,
   ConsoleMessage,
   Page,
   Protocol,
@@ -70,6 +71,8 @@ export interface TargetUniverse {
   /** The DevTools target corresponding to the puppeteer Page */
   target: DevTools.Target;
   universe: DevTools.Foundation.Universe.Universe;
+  /** The secondary session created for this page */
+  session: CDPSession;
 }
 export type TargetUniverseFactoryFn = (page: Page) => Promise<TargetUniverse>;
 
@@ -185,7 +188,7 @@ const DEFAULT_FACTORY: TargetUniverseFactoryFn = async (page: Page) => {
       .invoke_setSkipAllPauses({skip: true})
       .catch(() => undefined);
   }
-  return {target, universe};
+  return {target, universe, session};
 };
 
 // We don't want to pause any DevTools universe session ever on the MCP side.
