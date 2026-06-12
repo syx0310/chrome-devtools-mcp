@@ -6,10 +6,18 @@
 
 import assert from 'node:assert';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {describe, it} from 'node:test';
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import {
+  ListRootsRequestSchema,
+  RootsListChangedNotificationSchema,
+  type ClientCapabilities,
+  type TextContent,
+} from '@modelcontextprotocol/sdk/types.js';
 import {executablePath} from 'puppeteer';
 
 import type {ToolCategory} from '../src/tools/categories.js';
@@ -20,6 +28,7 @@ describe('e2e', () => {
   async function withClient(
     cb: (client: Client) => Promise<void>,
     extraArgs: string[] = [],
+    options: {capabilities?: ClientCapabilities} = {},
   ) {
     const transport = new StdioClientTransport({
       command: 'node',
@@ -38,7 +47,7 @@ describe('e2e', () => {
         version: '1.0.0',
       },
       {
-        capabilities: {},
+        capabilities: options.capabilities ?? {},
       },
     );
 
@@ -107,7 +116,7 @@ describe('e2e', () => {
         );
         assert.ok(listInPageTools);
       },
-      ['--category-in-page-tools'],
+      ['--category-experimental-in-page'],
     );
   });
 
@@ -160,6 +169,150 @@ describe('e2e', () => {
       ['--experimental-webmcp'],
     );
   });
+
+  it('updates roots when client notifies', async () => {
+    const roots = [{uri: 'file:///test-root', name: 'test-root'}];
+    let resolvePromise: () => void;
+    const promise = new Promise<void>(resolve => {
+      resolvePromise = resolve;
+    });
+
+    await withClient(
+      async client => {
+        client.setRequestHandler(ListRootsRequestSchema, () => {
+          resolvePromise();
+          return {roots};
+        });
+
+        await client.notification({
+          method: RootsListChangedNotificationSchema.shape.method.value,
+        });
+
+        // Wait for the server to process the notification and request roots
+        await promise;
+      },
+      [],
+      {
+        capabilities: {
+          roots: {listChanged: true},
+        },
+      },
+    );
+  });
+
+  it('denies file access if roots list is empty', async () => {
+    await withClient(
+      async client => {
+        client.setRequestHandler(ListRootsRequestSchema, () => {
+          return {roots: []};
+        });
+
+        const result = await client.callTool({
+          name: 'take_screenshot',
+          arguments: {
+            filePath: path.resolve(os.homedir(), 'test.png'),
+          },
+        });
+
+        assert.strictEqual(result.isError, true);
+        const content = result.content as TextContent[];
+        assert.match(content[0].text, /Access denied/);
+      },
+      [],
+      {
+        capabilities: {
+          roots: {listChanged: true},
+        },
+      },
+    );
+  });
+
+  it('allows file access if roots capability is missing', async () => {
+    await withClient(
+      async client => {
+        const result = await client.callTool({
+          name: 'take_screenshot',
+          arguments: {
+            filePath: '/tmp/test.png',
+          },
+        });
+
+        assert.strictEqual(result.isError, undefined);
+        const content = result.content as TextContent[];
+        assert.match(content[0].text, /Saved screenshot to/);
+      },
+      [],
+      {
+        capabilities: {},
+      },
+    );
+  });
+
+  describe('Dialogs', () => {
+    async function createNewPageAndTriggerDialog(client: Client) {
+      // Navigate to a page with a button that triggers a dialog on click
+      await client.callTool({
+        name: 'new_page',
+        arguments: {
+          url: `data:text/html,<button id="test" onclick="alert('test dialog')">Click me</button>`,
+        },
+      });
+
+      const snapshotResult = await client.callTool({
+        name: 'take_snapshot',
+        arguments: {},
+      });
+
+      const snapshotText = (snapshotResult.content as TextContent[])[0].text;
+      const match = snapshotText.match(/uid=(\d+_\d+)\s+button "Click me"/);
+      const uid = match ? match[1] : '1_1';
+
+      // Trigger the dialog
+      const result = await client.callTool({
+        name: 'click',
+        arguments: {
+          uid,
+        },
+      });
+
+      return result;
+    }
+
+    it('returns blocked message when dialog is opened during tool execution', async t => {
+      await withClient(async client => {
+        const result = await createNewPageAndTriggerDialog(client);
+        t.assert.snapshot?.(JSON.stringify(result));
+      });
+    });
+
+    it('when dialog is open and tool is blocked, returns an error', async t => {
+      await withClient(async client => {
+        await createNewPageAndTriggerDialog(client);
+        const result = await client.callTool({
+          name: 'take_screenshot',
+          arguments: {
+            filePath: '/tmp/test.png',
+          },
+        });
+
+        t.assert.snapshot?.(JSON.stringify(result));
+      });
+    });
+
+    it('when dialog is open and tool is not blocked, executes tool', async t => {
+      await withClient(async client => {
+        await createNewPageAndTriggerDialog(client);
+        const result = await client.callTool({
+          name: 'new_page',
+          arguments: {
+            url: `data:text/html,<h1>New</h1>`,
+          },
+        });
+
+        t.assert.snapshot?.(JSON.stringify(result));
+      });
+    });
+  });
 });
 
 async function getToolsWithFilteredCategories(
@@ -169,6 +322,7 @@ async function getToolsWithFilteredCategories(
   const definedNames = [];
   for (const file of files) {
     if (
+      !file.endsWith('.js') ||
       file === 'ToolDefinition.js' ||
       file === 'tools.js' ||
       file === 'slim'

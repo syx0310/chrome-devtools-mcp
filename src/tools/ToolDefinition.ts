@@ -46,6 +46,7 @@ export interface BaseToolDefinition<
     conditions?: string[];
   };
   schema: Schema;
+  blockedByDialog: boolean;
 }
 
 export interface ToolDefinition<
@@ -112,6 +113,10 @@ export interface Response {
     stats: DevTools.HeapSnapshotModel.HeapSnapshotModel.Statistics,
     staticData: DevTools.HeapSnapshotModel.HeapSnapshotModel.StaticData | null,
   ): void;
+  setHeapSnapshotNodes(
+    nodes: DevTools.HeapSnapshotModel.HeapSnapshotModel.ItemsRange,
+    options?: PaginationOptions,
+  ): void;
   setIncludePages(value: boolean): void;
   setIncludeNetworkRequests(
     value: boolean,
@@ -163,9 +168,10 @@ export type SupportedExtensions =
   | '.json.gz';
 
 /**
- * Only add methods required by tools/*.
+ * Only add methods used by tools/*.
  */
 export type Context = Readonly<{
+  validatePath(filePath?: string): void;
   isRunningPerformanceTrace(): boolean;
   setIsRunningPerformanceTrace(x: boolean): void;
   isCruxEnabled(): boolean;
@@ -234,8 +240,15 @@ export type Context = Readonly<{
   getHeapSnapshotStaticData(
     filePath: string,
   ): Promise<DevTools.HeapSnapshotModel.HeapSnapshotModel.StaticData | null>;
+  getHeapSnapshotNodesByUid(
+    filePath: string,
+    uid: number,
+  ): Promise<DevTools.HeapSnapshotModel.HeapSnapshotModel.ItemsRange>;
 }>;
 
+/**
+ * Only add methods used by tools/*.
+ */
 export type ContextPage = Readonly<{
   readonly pptrPage: Page;
   getAXNodeByUid(uid: string): TextSnapshotNode | undefined;
@@ -243,6 +256,7 @@ export type ContextPage = Readonly<{
 
   getDialog(): Dialog | undefined;
   clearDialog(): void;
+  throwIfDialogOpen(): void;
   waitForEventsAfterAction(
     action: () => Promise<unknown>,
     options?: {timeout?: number; handleDialog?: 'accept' | 'dismiss' | string},

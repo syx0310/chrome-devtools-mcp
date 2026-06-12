@@ -16,6 +16,14 @@ export interface FormattedSnapshotEntry {
   retainedSize: number;
 }
 
+export function isNodeLike(
+  item: unknown,
+): item is DevTools.HeapSnapshotModel.HeapSnapshotModel.Node {
+  return (
+    typeof item === 'object' && item !== null && 'id' in item && 'name' in item
+  );
+}
+
 export class HeapSnapshotFormatter {
   #aggregates: Record<string, AggregatedInfoWithUid>;
 
@@ -23,8 +31,31 @@ export class HeapSnapshotFormatter {
     this.#aggregates = aggregates;
   }
 
+  static formatNodes(
+    items: ReadonlyArray<
+      | DevTools.HeapSnapshotModel.HeapSnapshotModel.Node
+      | DevTools.HeapSnapshotModel.HeapSnapshotModel.Edge
+    >,
+  ): string {
+    const lines: string[] = [];
+
+    if (items.length > 0 && isNodeLike(items[0])) {
+      lines.push('id,name,type,distance,selfSize,retainedSize');
+    }
+
+    for (const item of items) {
+      if (isNodeLike(item)) {
+        lines.push(
+          `${item.id},"${item.name}",${item.type},${item.distance},${item.selfSize},${item.retainedSize}`,
+        );
+      }
+    }
+
+    return lines.join('\n');
+  }
+
   #getSortedAggregates(): AggregatedInfoWithUid[] {
-    return Object.values(this.#aggregates).sort((a, b) => b.self - a.self);
+    return Object.values(this.#aggregates).sort((a, b) => b.maxRet - a.maxRet);
   }
 
   toString(): string {
@@ -61,6 +92,6 @@ export class HeapSnapshotFormatter {
   ): Array<
     [string, DevTools.HeapSnapshotModel.HeapSnapshotModel.AggregatedInfo]
   > {
-    return Object.entries(aggregates).sort((a, b) => b[1].self - a[1].self);
+    return Object.entries(aggregates).sort((a, b) => b[1].maxRet - a[1].maxRet);
   }
 }

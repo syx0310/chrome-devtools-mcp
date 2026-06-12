@@ -19,12 +19,14 @@ describe('cli args parsing', () => {
     categoryNetwork: true,
     'category-extensions': false,
     categoryExtensions: false,
+    'category-experimental-in-page': false,
+    categoryExperimentalInPage: false,
     'auto-connect': undefined,
     autoConnect: undefined,
     'performance-crux': true,
     performanceCrux: true,
-    'usage-statistics': true,
-    usageStatistics: true,
+    'usage-statistics': false,
+    usageStatistics: false,
     stealth: true,
     'anti-devtools-detection': true,
     antiDevtoolsDetection: true,
@@ -259,9 +261,9 @@ describe('cli args parsing', () => {
   });
 
   it('parses usage statistics flag', async () => {
-    // Test default (should be true).
+    // Test default (should be false).
     const defaultArgs = parseArguments('1.0.0', ['node', 'main.js']);
-    assert.strictEqual(defaultArgs.usageStatistics, true);
+    assert.strictEqual(defaultArgs.usageStatistics, false);
 
     // Test enabling it
     const enabledArgs = parseArguments('1.0.0', [
