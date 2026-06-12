@@ -1,8 +1,8 @@
-# Chrome DevTools for Agents
+# Chrome DevTools for agents
 
 [![npm chrome-devtools-mcp package](https://img.shields.io/npm/v/chrome-devtools-mcp.svg)](https://npmjs.org/package/chrome-devtools-mcp)
 
-Chrome DevTools for Agents (`chrome-devtools-mcp`) lets your coding agent (such as Gemini, Claude, Cursor or Copilot)
+Chrome DevTools for agents (`chrome-devtools-mcp`) lets your coding agent (such as Gemini, Claude, Cursor or Copilot)
 control and inspect a live Chrome browser. It acts as a Model-Context-Protocol
 (MCP) server, giving your AI coding assistant access to the full power of
 Chrome DevTools for reliable automation, in-depth debugging, and performance analysis.
@@ -61,7 +61,7 @@ You can disable these update checks by setting the `CHROME_DEVTOOLS_MCP_NO_UPDAT
 
 ## Requirements
 
-- [Node.js](https://nodejs.org/) v20.19 or a newer [latest maintenance LTS](https://github.com/nodejs/Release#release-schedule) version.
+- [Node.js](https://nodejs.org/) [LTS](https://github.com/nodejs/Release#release-schedule).
 - [Chrome](https://www.google.com/chrome/) current stable version or newer.
 - [npm](https://www.npmjs.com/)
 
@@ -514,9 +514,10 @@ If you run into any issues, checkout our [troubleshooting guide](./docs/troubles
   - [`take_snapshot`](docs/tool-reference.md#take_snapshot)
   - [`screencast_start`](docs/tool-reference.md#screencast_start)
   - [`screencast_stop`](docs/tool-reference.md#screencast_stop)
-- **Memory** (4 tools)
+- **Memory** (5 tools)
   - [`take_memory_snapshot`](docs/tool-reference.md#take_memory_snapshot)
   - [`get_memory_snapshot_details`](docs/tool-reference.md#get_memory_snapshot_details)
+  - [`get_node_retainers`](docs/tool-reference.md#get_node_retainers)
   - [`get_nodes_by_class`](docs/tool-reference.md#get_nodes_by_class)
   - [`load_memory_snapshot`](docs/tool-reference.md#load_memory_snapshot)
 - **Extensions** (5 tools)
@@ -595,8 +596,28 @@ The Chrome DevTools MCP server supports the following configuration option:
   If enabled, ignores errors relative to self-signed and expired certificates. Use with caution.
   - **Type:** boolean
 
+- **`--experimentalPageIdRouting`/ `--experimental-page-id-routing`**
+  Whether to expose pageId on page-scoped tools and route requests by page ID (useful for concurrent agent sessions).
+  - **Type:** boolean
+
+- **`--experimentalDevtools`/ `--experimental-devtools`**
+  Whether to enable automation over DevTools targets
+  - **Type:** boolean
+
 - **`--experimentalVision`/ `--experimental-vision`**
   Whether to enable coordinate-based tools such as click_at(x,y). Usually requires a computer-use model able to produce accurate coordinates by looking at screenshots.
+  - **Type:** boolean
+
+- **`--experimentalMemory`/ `--experimental-memory`**
+  Whether to enable experimental memory tools.
+  - **Type:** boolean
+
+- **`--experimentalStructuredContent`/ `--experimental-structured-content`**
+  Whether to output structured formatted content.
+  - **Type:** boolean
+
+- **`--experimentalIncludeAllPages`/ `--experimental-include-all-pages`**
+  Whether to include all kinds of pages such as webviews or background pages as pages.
   - **Type:** boolean
 
 - **`--experimentalScreencast`/ `--experimental-screencast`**
@@ -669,7 +690,7 @@ The Chrome DevTools MCP server supports the following configuration option:
   - **Type:** boolean
 
 - **`--redactNetworkHeaders`/ `--redact-network-headers`**
-  If true, redacts some of the network headers considered senstive before returning to the client.
+  If true, redacts some of the network headers considered sensitive before returning to the client.
   - **Type:** boolean
   - **Default:** `false`
 
@@ -717,6 +738,34 @@ To get the WebSocket endpoint from a running Chrome instance, visit `http://127.
 You can also run `npx chrome-devtools-mcp@latest --help` to see all available configuration options.
 
 ## Concepts
+
+### Concurrent sessions
+
+Most MCP clients start one Chrome DevTools MCP server per conversation. If your
+client shares a single server instance across concurrent agents or subagents,
+start the server with `--experimentalPageIdRouting`. This exposes `pageId` on
+page-scoped tools so each agent can route tool calls to the tab it is working
+with.
+
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--experimentalPageIdRouting"
+      ]
+    }
+  }
+}
+```
+
+If you run multiple independent MCP client sessions and want each session to
+launch its own temporary Chrome profile, also pass `--isolated`. This avoids
+sharing the default Chrome DevTools MCP user data directory between those
+server instances.
 
 ### User data directory
 

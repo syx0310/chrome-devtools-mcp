@@ -25,7 +25,7 @@ describe('browser', () => {
       headless: true,
       isolated: false,
       userDataDir: folderPath,
-      executablePath: executablePath(),
+      executablePath: await executablePath(),
       devtools: false,
     });
     try {
@@ -34,7 +34,7 @@ describe('browser', () => {
           headless: true,
           isolated: false,
           userDataDir: folderPath,
-          executablePath: executablePath(),
+          executablePath: await executablePath(),
           devtools: false,
         });
         await browser2.close();
@@ -57,7 +57,7 @@ describe('browser', () => {
       headless: true,
       isolated: false,
       userDataDir: folderPath,
-      executablePath: executablePath(),
+      executablePath: await executablePath(),
       viewport: {
         width: 1501,
         height: 801,
@@ -81,7 +81,7 @@ describe('browser', () => {
     const browser = await launch({
       headless: true,
       isolated: true,
-      executablePath: executablePath(),
+      executablePath: await executablePath(),
       devtools: false,
       stealth: true,
     });
@@ -215,7 +215,7 @@ describe('browser', () => {
     const browser = await launch({
       headless: true,
       isolated: true,
-      executablePath: executablePath(),
+      executablePath: await executablePath(),
       devtools: false,
       stealth: false,
       antiDevtoolsDetection: true,
@@ -292,7 +292,7 @@ describe('browser', () => {
       headless: true,
       isolated: false,
       userDataDir: folderPath,
-      executablePath: executablePath(),
+      executablePath: await executablePath(),
       devtools: false,
       chromeArgs: ['--remote-debugging-port=0'],
     });

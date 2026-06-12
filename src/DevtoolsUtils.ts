@@ -165,6 +165,10 @@ const DEFAULT_FACTORY: TargetUniverseFactoryFn = async (page: Page) => {
 
   const targetManager = universe.context.get(DevTools.TargetManager);
   targetManager.observeModels(DevTools.DebuggerModel, SKIP_ALL_PAUSES);
+  targetManager.observeModels(
+    DevTools.NetworkManager.NetworkManager,
+    DISABLE_NETWORK,
+  );
 
   const target = targetManager.createTarget(
     'main',
@@ -200,6 +204,20 @@ const SKIP_ALL_PAUSES = {
         void model.agent.invoke_resume({});
       },
     );
+  },
+
+  modelRemoved(): void {
+    // Do nothing.
+  },
+};
+
+// Not recording network requests in the DevTools universe.
+//
+// The network requests are collected through pptr and there isn't a use case for
+// enabling devtools SDK's network domain.
+const DISABLE_NETWORK = {
+  modelAdded(model: DevTools.NetworkManager.NetworkManager): void {
+    void model.target().networkAgent().invoke_disable();
   },
 
   modelRemoved(): void {
