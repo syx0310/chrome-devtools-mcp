@@ -220,7 +220,11 @@ const bundleDependency = (
               }
               if (dependency.licenseText !== null) {
                 arr.push('');
-                arr.push(dependency.licenseText.replaceAll('\r', ''));
+                arr.push(
+                  dependency.licenseText
+                    .replaceAll('\r', '')
+                    .replace(/[ \t]+$/gm, ''),
+                );
               }
               return arr.join('\n');
             });
