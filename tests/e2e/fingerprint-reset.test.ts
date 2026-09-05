@@ -44,128 +44,173 @@ const pagesSchema = zod.object({
 describe('standalone fingerprint reset', () => {
   const server = serverHooks();
 
-  it('rotates a live MCP session from another CLI process without changing existing pages', async () => {
-    const directory = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'fingerprint-reset-'),
-    );
-    const stateFile = path.join(directory, 'fingerprint.json');
-    const entry = path.resolve('build/src/bin/chrome-devtools-mcp.js');
-    const reset = () =>
-      execute(
-        process.execPath,
-        [entry, '--reset-fingerprint', '--fingerprint-file', stateFile],
-        {timeout: 10000},
-      );
-    const cold = await reset();
-    assert.match(cold.stdout, /Fingerprint reset:/);
-    const beforeRevision = await readFingerprintRevision(stateFile);
-    server.addHtmlRoute(
-      '/reset-test',
-      '<!doctype html><title>Reset test</title><body>Ready</body>',
-    );
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [
-        entry,
-        '--headless',
-        '--isolated',
-        '--executable-path',
-        await executablePath(),
-        '--fingerprint-file',
-        stateFile,
-        '--experimental-structured-content',
-      ],
-      env: {
-        ...process.env,
-        CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: 'true',
-        CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: 'true',
+  for (const stealthRuntime of [false, true]) {
+    it(
+      'rotates a live MCP session from another CLI process without changing existing pages (stealth Runtime: ' +
+        stealthRuntime +
+        ')',
+      async () => {
+        const directory = await fs.mkdtemp(
+          path.join(os.tmpdir(), 'fingerprint-reset-'),
+        );
+        const stateFile = path.join(directory, 'fingerprint.json');
+        const entry = path.resolve('build/src/bin/chrome-devtools-mcp.js');
+        const reset = () =>
+          execute(
+            process.execPath,
+            [entry, '--reset-fingerprint', '--fingerprint-file', stateFile],
+            {timeout: 10000},
+          );
+        const cold = await reset();
+        assert.match(cold.stdout, /Fingerprint reset:/);
+        const beforeRevision = await readFingerprintRevision(stateFile);
+        server.addHtmlRoute(
+          '/reset-test',
+          '<!doctype html><title>Reset test</title><body>Ready</body>',
+        );
+        const transport = new StdioClientTransport({
+          command: process.execPath,
+          args: [
+            entry,
+            '--headless',
+            '--isolated',
+            '--executable-path',
+            await executablePath(),
+            '--fingerprint-file',
+            stateFile,
+            '--experimental-structured-content',
+            ...(stealthRuntime ? ['--experimental-stealth-runtime'] : []),
+          ],
+          env: {
+            ...process.env,
+            CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: 'true',
+            CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: 'true',
+          },
+          stderr: 'pipe',
+        });
+        const client = new Client({
+          name: 'fingerprint-reset-test',
+          version: '1.0.0',
+        });
+        const call = async (name: string, args: Record<string, unknown>) => {
+          const result = resultSchema.parse(
+            await client.callTool({name, arguments: args}),
+          );
+          assert.notEqual(result.isError, true, JSON.stringify(result));
+          return result;
+        };
+        const newPage = async (isolatedContext?: string) => {
+          const result = await call('new_page', {
+            url: server.getRoute('/reset-test'),
+            ...(isolatedContext ? {isolatedContext} : {}),
+          });
+          const selected = pagesSchema
+            .parse(result.structuredContent)
+            .pages.find(page => page.selected);
+          assert.ok(selected, JSON.stringify(result));
+          return selected;
+        };
+        const evaluate = async (
+          pageId: number,
+          script: string,
+        ): Promise<unknown> => {
+          const result = await call('evaluate_script', {
+            pageId,
+            function: script,
+          });
+          const text = result.content.map(part => part.text ?? '').join('\n');
+          const json = text.match(/```json\n([\s\S]*?)\n```/)?.[1];
+          assert.ok(json, text);
+          return JSON.parse(json);
+        };
+        try {
+          await client.connect(transport);
+          const pinned = await newPage('pinned');
+          const initial = await evaluate(
+            pinned.id,
+            `() => {localStorage.setItem('session', 'retained'); return {ua:navigator.userAgent, cpu:navigator.hardwareConcurrency, width:screen.width, height:screen.height};}`,
+          );
+          const output = await reset();
+          assert.match(
+            output.stdout,
+            /Existing pages and named sessions are unchanged/,
+          );
+          const afterRevision = await readFingerprintRevision(stateFile);
+          assert.notEqual(afterRevision, beforeRevision);
+          const fresh = await newPage();
+          assert.notEqual(fresh.id, pinned.id);
+          const freshData = zod
+            .object({ua: zod.string(), session: zod.string().nullable()})
+            .parse(
+              await evaluate(
+                fresh.id,
+                `() => ({ua:navigator.userAgent, session:localStorage.getItem('session')})`,
+              ),
+            );
+          assert.doesNotMatch(freshData.ua, /HeadlessChrome/);
+          assert.equal(freshData.session, null);
+          assert.deepEqual(
+            await evaluate(
+              pinned.id,
+              `() => ({ua:navigator.userAgent, cpu:navigator.hardwareConcurrency, width:screen.width, height:screen.height})`,
+            ),
+            initial,
+          );
+          const continued = await newPage('pinned');
+          assert.equal(
+            await evaluate(
+              continued.id,
+              `() => localStorage.getItem('session')`,
+            ),
+            'retained',
+          );
+          if (stealthRuntime) {
+            const probe = `() => {
+          const old = Object.getOwnPropertyDescriptor(Error, 'prepareStackTrace');
+          let reads = 0;
+          try {
+            Error.prepareStackTrace = () => { reads++; return 'custom'; };
+            console.log(new Error('runtime mode probe'));
+            return reads;
+          } finally {
+            if (old) Object.defineProperty(Error, 'prepareStackTrace', old);
+            else delete Error.prepareStackTrace;
+          }
+        }`;
+            assert.equal(await evaluate(continued.id, probe), 0);
+            const debugMode = await call('set_runtime_mode', {mode: 'debug'});
+            assert.match(
+              JSON.stringify(debugMode.content),
+              /Runtime mode: debug/,
+            );
+            assert.equal(await evaluate(continued.id, probe), 1);
+            await call('set_runtime_mode', {mode: 'stealth'});
+            await call('navigate_page', {pageId: continued.id, type: 'reload'});
+            assert.equal(await evaluate(continued.id, probe), 0);
+            const logs = await call('list_console_messages', {
+              pageId: continued.id,
+            });
+            assert.match(JSON.stringify(logs.content), /text summaries/);
+          }
+          const profileFiles = await fs.readdir(`${stateFile}.profiles`);
+          const ids = new Set<string>();
+          for (const file of profileFiles) {
+            const profile = fingerprintSchema.parse(
+              JSON.parse(
+                await fs.readFile(
+                  path.join(`${stateFile}.profiles`, file),
+                  'utf8',
+                ),
+              ),
+            );
+            ids.add(profile.id);
+          }
+          assert.equal(ids.size, 2);
+        } finally {
+          await client.close();
+          await fs.rm(directory, {recursive: true, force: true});
+        }
       },
-      stderr: 'pipe',
-    });
-    const client = new Client({
-      name: 'fingerprint-reset-test',
-      version: '1.0.0',
-    });
-    const call = async (name: string, args: Record<string, unknown>) => {
-      const result = resultSchema.parse(
-        await client.callTool({name, arguments: args}),
-      );
-      assert.notEqual(result.isError, true, JSON.stringify(result));
-      return result;
-    };
-    const newPage = async (isolatedContext?: string) => {
-      const result = await call('new_page', {
-        url: server.getRoute('/reset-test'),
-        ...(isolatedContext ? {isolatedContext} : {}),
-      });
-      const selected = pagesSchema
-        .parse(result.structuredContent)
-        .pages.find(page => page.selected);
-      assert.ok(selected, JSON.stringify(result));
-      return selected;
-    };
-    const evaluate = async (
-      pageId: number,
-      script: string,
-    ): Promise<unknown> => {
-      const result = await call('evaluate_script', {pageId, function: script});
-      const text = result.content.map(part => part.text ?? '').join('\n');
-      const json = text.match(/```json\n([\s\S]*?)\n```/)?.[1];
-      assert.ok(json, text);
-      return JSON.parse(json);
-    };
-    try {
-      await client.connect(transport);
-      const pinned = await newPage('pinned');
-      const initial = await evaluate(
-        pinned.id,
-        `() => {localStorage.setItem('session', 'retained'); return {ua:navigator.userAgent, cpu:navigator.hardwareConcurrency, width:screen.width, height:screen.height};}`,
-      );
-      const output = await reset();
-      assert.match(
-        output.stdout,
-        /Existing pages and named sessions are unchanged/,
-      );
-      const afterRevision = await readFingerprintRevision(stateFile);
-      assert.notEqual(afterRevision, beforeRevision);
-      const fresh = await newPage();
-      assert.notEqual(fresh.id, pinned.id);
-      const freshData = zod
-        .object({ua: zod.string(), session: zod.string().nullable()})
-        .parse(
-          await evaluate(
-            fresh.id,
-            `() => ({ua:navigator.userAgent, session:localStorage.getItem('session')})`,
-          ),
-        );
-      assert.doesNotMatch(freshData.ua, /HeadlessChrome/);
-      assert.equal(freshData.session, null);
-      assert.deepEqual(
-        await evaluate(
-          pinned.id,
-          `() => ({ua:navigator.userAgent, cpu:navigator.hardwareConcurrency, width:screen.width, height:screen.height})`,
-        ),
-        initial,
-      );
-      const continued = await newPage('pinned');
-      assert.equal(
-        await evaluate(continued.id, `() => localStorage.getItem('session')`),
-        'retained',
-      );
-      const profileFiles = await fs.readdir(`${stateFile}.profiles`);
-      const ids = new Set<string>();
-      for (const file of profileFiles) {
-        const profile = fingerprintSchema.parse(
-          JSON.parse(
-            await fs.readFile(path.join(`${stateFile}.profiles`, file), 'utf8'),
-          ),
-        );
-        ids.add(profile.id);
-      }
-      assert.equal(ids.size, 2);
-    } finally {
-      await client.close();
-      await fs.rm(directory, {recursive: true, force: true});
-    }
-  });
+    );
+  }
 });

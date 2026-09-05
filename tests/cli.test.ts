@@ -26,6 +26,7 @@ describe('cli args parsing', () => {
     performanceCrux: true,
     usageStatistics: false,
     stealth: true,
+    experimentalStealthRuntime: false,
     antiDevtoolsDetection: false,
     redactNetworkHeaders: false,
     allowUnrestrictedPaths: false,

@@ -21,6 +21,7 @@ import {
   prepareFingerprintContext,
 } from '../src/stealth.js';
 import {zod, type Browser, type Page} from '../src/third_party/index.js';
+import type {ConsoleMessage} from '../src/third_party/index.js';
 
 import {serverHooks} from './server.js';
 
@@ -132,6 +133,64 @@ describe('stealth browser contracts', () => {
     assert.ok(surfaces.outer.height >= surfaces.inner.height);
     assert.ok(surfaces.screen.width >= surfaces.outer.width);
     assert.ok(surfaces.screen.height >= surfaces.outer.height);
+  });
+
+  it('bounds automatic console stacks while retaining application stack limits', async () => {
+    const p = await page();
+    const message = new Promise<ConsoleMessage>(resolve => {
+      p.once('console', resolve);
+    });
+    const explicitDepth = await p.evaluate(() => {
+      const previous = Error.stackTraceLimit;
+      Error.stackTraceLimit = 40;
+      try {
+        function recurse(depth: number): number {
+          if (depth > 0) {
+            return recurse(depth - 1);
+          }
+          console.log('runtime-stack-limit');
+          return new Error('application stack').stack?.split('\n').length ?? 0;
+        }
+        return recurse(50);
+      } finally {
+        Error.stackTraceLimit = previous;
+      }
+    });
+    const logged = await message;
+    assert.equal(logged.text(), 'runtime-stack-limit');
+    assert.ok(logged.stackTrace().length > 0);
+    assert.ok(logged.stackTrace().length <= 10);
+    assert.ok(explicitDepth >= 40);
+  });
+
+  it('limits worker console capture before the first worker script runs', async () => {
+    const p = await page();
+    server.addRoute('/stack-worker.js', (_request, response) => {
+      response.setHeader('Content-Type', 'application/javascript');
+      response.end(`function recurse(depth) {
+        if (depth > 0) return recurse(depth - 1);
+        console.log('worker-stack-limit');
+        postMessage('done');
+      }
+      recurse(50);`);
+    });
+    const message = new Promise<ConsoleMessage>(resolve => {
+      p.once('console', resolve);
+    });
+    await p.evaluate(
+      () =>
+        new Promise<void>(resolve => {
+          const worker = new Worker('/stack-worker.js');
+          worker.onmessage = () => {
+            worker.terminate();
+            resolve();
+          };
+        }),
+    );
+    const logged = await message;
+    assert.equal(logged.text(), 'worker-stack-limit');
+    assert.ok(logged.stackTrace().length > 0);
+    assert.ok(logged.stackTrace().length <= 10);
   });
 
   for (const type of ['classic', 'module']) {

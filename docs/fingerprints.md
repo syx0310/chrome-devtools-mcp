@@ -71,6 +71,36 @@ Fingerprint consistency does not hide every DevTools Protocol signal. Public
 detectors can still identify an instrumented browser through CDP or timing
 behavior, even when UA, Client Hints and worker values agree.
 
+## Reduce Runtime observation
+
+To avoid persistent Runtime subscriptions, start the MCP server with:
+
+```sh
+chrome-devtools-mcp --experimental-stealth-runtime
+```
+
+This experimental mode discovers execution contexts through temporary bindings
+and keeps native page APIs intact. It supports navigation, frames, workers,
+script evaluation and fingerprint reset. Console collection uses text summaries
+with limited source locations; it cannot retain live object handles, full
+exception metadata or complete stacks.
+
+Use the `set_runtime_mode` MCP tool with `{"mode":"debug"}` before reproducing a
+problem that requires detailed console objects, exception metadata or deeper
+DevTools analysis. Return with `{"mode":"stealth"}`. The switch applies to
+MCP-owned sessions in the current browser and does not reset fingerprint state,
+cookies or storage. Earlier log details cannot be recovered. Reload existing
+pages to start a fresh detection measurement after switching back.
+
+The default remains detailed Runtime debugging. In fingerprint stealth mode,
+automatic Runtime stack capture is limited to ten frames to avoid extra work
+that grows with application call depth. The page's own `Error.stackTraceLimit`
+and custom stack formatters remain under application control.
+
+Independent DevTools clients and tools that start their own debugging sessions,
+including Lighthouse, can expose CDP signals while active. Passing a public
+detector does not establish invisibility to every detector.
+
 ## Development verification
 
 ```sh

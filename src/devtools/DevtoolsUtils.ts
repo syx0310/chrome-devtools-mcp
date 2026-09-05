@@ -5,6 +5,7 @@
  */
 
 import {DevTools} from '../third_party/index.js';
+import {markDevToolsRuntimeSession} from '../stealthRuntime.js';
 import type {
   CDPSession,
   ConsoleMessage,
@@ -134,6 +135,7 @@ export interface TargetUniverse {
 export async function createTargetUniverse(
   session: CDPSession,
 ): Promise<TargetUniverse> {
+  markDevToolsRuntimeSession(session);
   const settingStorage = new DevTools.Common.Settings.SettingsStorage({});
   const universe = new DevTools.Foundation.Universe.Universe({
     settingsCreationOptions: {

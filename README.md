@@ -549,11 +549,12 @@ If you run into any issues, checkout our [troubleshooting guide](./docs/troubles
 - **Network** (2 tools)
   - [`get_network_request`](docs/tool-reference.md#get_network_request)
   - [`list_network_requests`](docs/tool-reference.md#list_network_requests)
-- **Debugging** (8 tools)
+- **Debugging** (9 tools)
   - [`evaluate_script`](docs/tool-reference.md#evaluate_script)
   - [`get_console_message`](docs/tool-reference.md#get_console_message)
   - [`lighthouse_audit`](docs/tool-reference.md#lighthouse_audit)
   - [`list_console_messages`](docs/tool-reference.md#list_console_messages)
+  - [`set_runtime_mode`](docs/tool-reference.md#set_runtime_mode)
   - [`take_screenshot`](docs/tool-reference.md#take_screenshot)
   - [`take_snapshot`](docs/tool-reference.md#take_snapshot)
   - [`screencast_start`](docs/tool-reference.md#screencast_start)
@@ -712,6 +713,11 @@ The Chrome DevTools MCP server supports the following configuration option:
 - **`--fingerprintFile`/ `--fingerprint-file`**
   Path to persistent fingerprint state. Use the same path with --reset-fingerprint to rotate fingerprints for new sessions.
   - **Type:** string
+  - **Default:** `false`
+
+- **`--experimentalStealthRuntime`/ `--experimental-stealth-runtime`**
+  Avoids persistent Runtime subscriptions. Console logs become text summaries. Use set_runtime_mode to enable detailed debugging when needed.
+  - **Type:** boolean
   - **Default:** `false`
 
 - **`--resetFingerprint`/ `--reset-fingerprint`**

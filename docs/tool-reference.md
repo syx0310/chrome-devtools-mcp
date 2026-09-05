@@ -30,11 +30,12 @@
 - **[Network](#network)** (2 tools)
   - [`get_network_request`](#get_network_request)
   - [`list_network_requests`](#list_network_requests)
-- **[Debugging](#debugging)** (8 tools)
+- **[Debugging](#debugging)** (9 tools)
   - [`evaluate_script`](#evaluate_script)
   - [`get_console_message`](#get_console_message)
   - [`lighthouse_audit`](#lighthouse_audit)
   - [`list_console_messages`](#list_console_messages)
+  - [`set_runtime_mode`](#set_runtime_mode)
   - [`take_screenshot`](#take_screenshot)
   - [`take_snapshot`](#take_snapshot)
   - [`screencast_start`](#screencast_start)
@@ -426,6 +427,16 @@
 - **pageSize** (integer) _(optional)_: Maximum number of messages to return. When omitted, returns all messages.
 - **serviceWorkerId** (string) _(optional)_: Filter messages to only return messages of the specified service worker.
 - **types** (array) _(optional)_: Filter messages to only return messages of the specified resource types. When omitted or empty, returns all messages.
+
+---
+
+### `set_runtime_mode`
+
+**Description:** Switches all MCP-owned sessions in this browser between stealth collection (text-only console logs) and detailed Runtime debugging. Debug mode exposes CDP signals. Switching back does not erase detections or restore earlier log details; reload the page to start a new measurement.
+
+**Parameters:**
+
+- **mode** (enum: "stealth", "debug") **(required)**: stealth avoids persistent Runtime subscriptions; debug enables full console objects and exception metadata.
 
 ---
 

@@ -55,6 +55,7 @@ import type {TraceResult} from './processors/PerformanceTrace.js';
 import type {Logger} from './types.js';
 import type {ExtensionServiceWorker} from './types.js';
 import {getTempFilePath, resolveCanonicalPath} from './utils/files.js';
+import {setRuntimeMode} from './stealthRuntime.js';
 interface McpContextOptions {
   // Whether the DevTools windows are exposed as pages for debugging of DevTools.
   experimentalDevToolsDebugging: boolean;
@@ -730,6 +731,10 @@ export class McpContext implements Context {
       ),
     ]);
     return id;
+  }
+
+  async setRuntimeMode(mode: 'stealth' | 'debug'): Promise<void> {
+    await setRuntimeMode(this.browser, mode);
   }
 
   async uninstallExtension(id: string): Promise<void> {

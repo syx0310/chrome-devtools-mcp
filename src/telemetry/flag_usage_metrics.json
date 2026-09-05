@@ -417,5 +417,13 @@
   {
     "name": "reset_fingerprint",
     "flagType": "boolean"
+  },
+  {
+    "name": "experimental_stealth_runtime_present",
+    "flagType": "boolean"
+  },
+  {
+    "name": "experimental_stealth_runtime",
+    "flagType": "boolean"
   }
 ]

@@ -144,6 +144,7 @@ export async function createMcpServer(
             wsHeaders: serverArgs.wsHeaders,
             stealth: serverArgs.stealth,
             fingerprintFile: serverArgs.fingerprintFile,
+            experimentalStealthRuntime: serverArgs.experimentalStealthRuntime,
             // Important: only pass channel, if autoConnect is true.
             channel: serverArgs.autoConnect
               ? (serverArgs.channel as Channel)
@@ -169,6 +170,7 @@ export async function createMcpServer(
             viaCli: serverArgs.viaCli,
             stealth: serverArgs.stealth,
             fingerprintFile: serverArgs.fingerprintFile,
+            experimentalStealthRuntime: serverArgs.experimentalStealthRuntime,
             antiDevtoolsDetection: serverArgs.antiDevtoolsDetection,
             blocklist,
             allowlist,

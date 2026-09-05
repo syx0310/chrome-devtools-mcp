@@ -13,6 +13,7 @@ import {
   applyAntiDevtoolsDetectionToBrowser,
   applyStealthToBrowser,
 } from './stealth.js';
+import {withStealthStackCapture} from './stealthRuntime.js';
 import type {
   Browser,
   ChromeReleaseChannel,
@@ -58,6 +59,7 @@ export async function ensureBrowserConnected(options: {
   userDataDir?: string;
   enableExtensions?: boolean;
   stealth?: boolean;
+  experimentalStealthRuntime?: boolean;
   fingerprintFile?: string;
   blocklist?: string[];
   allowlist?: string[];
@@ -136,7 +138,11 @@ export async function ensureBrowserConnected(options: {
     // Assign mode before browser so a concurrent closeBrowser() never sees
     // `browser` set with `browserMode` still undefined (would fall through
     // to the disconnect() path and orphan a launched Chrome).
-    const connected = await puppeteer.connect(connectOptions);
+    const connected = await withStealthStackCapture(
+      options.stealth,
+      () => puppeteer.connect(connectOptions),
+      options.experimentalStealthRuntime,
+    );
     browserMode = 'connected';
     browser = connected;
   } catch (err) {
@@ -179,6 +185,7 @@ interface McpLaunchOptions {
   devtools: boolean;
   enableExtensions?: boolean;
   stealth?: boolean;
+  experimentalStealthRuntime?: boolean;
   fingerprintFile?: string;
   antiDevtoolsDetection?: boolean;
   viaCli?: boolean;
@@ -269,23 +276,28 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
   }
 
   try {
-    const browser = await puppeteer.launch({
-      channel: puppeteerChannel,
-      targetFilter: makeTargetFilter(options.enableExtensions),
-      executablePath,
-      defaultViewport: null,
-      userDataDir,
-      pipe: true,
-      headless,
-      args,
-      ignoreDefaultArgs: ignoreDefaultArgs,
-      acceptInsecureCerts: options.acceptInsecureCerts,
-      handleDevToolsAsPage: true,
-      enableExtensions: options.enableExtensions,
-      blocklist: options.blocklist,
-      allowlist: options.allowlist,
-      logger: puppeteerLogger,
-    });
+    const browser = await withStealthStackCapture(
+      options.stealth,
+      () =>
+        puppeteer.launch({
+          channel: puppeteerChannel,
+          targetFilter: makeTargetFilter(options.enableExtensions),
+          executablePath,
+          defaultViewport: null,
+          userDataDir,
+          pipe: true,
+          headless,
+          args,
+          ignoreDefaultArgs: ignoreDefaultArgs,
+          acceptInsecureCerts: options.acceptInsecureCerts,
+          handleDevToolsAsPage: true,
+          enableExtensions: options.enableExtensions,
+          blocklist: options.blocklist,
+          allowlist: options.allowlist,
+          logger: puppeteerLogger,
+        }),
+      options.experimentalStealthRuntime,
+    );
     if (options.logFile) {
       // FIXME: we are probably subscribing too late to catch startup logs. We
       // should expose the process earlier or expose the getRecentLogs() getter.

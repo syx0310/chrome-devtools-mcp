@@ -1053,5 +1053,14 @@
         "argType": "number"
       }
     ]
+  },
+  {
+    "name": "set_runtime_mode",
+    "args": [
+      {
+        "name": "mode",
+        "argType": "string"
+      }
+    ]
   }
 ]

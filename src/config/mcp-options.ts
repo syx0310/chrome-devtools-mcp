@@ -212,6 +212,12 @@ export const mcpOptions = {
     describe:
       'Path to persistent fingerprint state. Use the same path with --reset-fingerprint to rotate fingerprints for new sessions.',
   },
+  experimentalStealthRuntime: {
+    type: 'boolean',
+    default: false,
+    describe:
+      'Avoids persistent Runtime subscriptions. Console logs become text summaries. Use set_runtime_mode to enable detailed debugging when needed.',
+  },
   resetFingerprint: {
     type: 'boolean',
     describe:

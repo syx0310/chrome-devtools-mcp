@@ -1398,6 +1398,21 @@ export const commands: Commands = {
       },
     },
   },
+  set_runtime_mode: {
+    description:
+      'Switches all MCP-owned sessions in this browser between stealth collection (text-only console logs) and detailed Runtime debugging. Debug mode exposes CDP signals. Switching back does not erase detections or restore earlier log details; reload the page to start a new measurement.',
+    category: 'Debugging',
+    args: {
+      mode: {
+        name: 'mode',
+        type: 'string',
+        description:
+          'stealth avoids persistent Runtime subscriptions; debug enables full console objects and exception metadata.',
+        required: true,
+        enum: ['stealth', 'debug'],
+      },
+    },
+  },
   take_heapsnapshot: {
     description:
       'Capture a heap snapshot of the target page. Use to analyze the memory distribution of JavaScript objects and debug memory leaks.',

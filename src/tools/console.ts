@@ -5,6 +5,7 @@
  */
 
 import {zod} from '../third_party/index.js';
+import {getRuntimeMode} from '../stealthRuntime.js';
 import type {ConsoleMessageType} from '../third_party/index.js';
 
 import {ToolCategory} from './categories.js';
@@ -94,6 +95,13 @@ export const listConsoleMessages = definePageTool(cliArgs => {
     blockedByDialog: false,
     verifyFilesSchema: {},
     handler: async (request, response) => {
+      if (
+        (await getRuntimeMode(request.page.pptrPage.browser())) === 'stealth'
+      ) {
+        response.appendResponseLine(
+          'Stealth Runtime mode: console entries are text summaries with limited locations. Use set_runtime_mode with mode="debug" before reproducing an issue to capture full objects and exception details.',
+        );
+      }
       response.setIncludeConsoleData(true, {
         pageSize: request.params.pageSize,
         pageIdx: request.params.pageIdx,
