@@ -50,6 +50,7 @@ describe('ClearcutLogger', () => {
         schema: {},
         success: true,
         latencyMs: 123,
+        context: {},
       });
 
       assert(mockWatchdogClient.send.calledOnce);
@@ -58,6 +59,32 @@ describe('ClearcutLogger', () => {
       assert.strictEqual(msg.payload.tool_invocation?.tool_name, 'test_tool');
       assert.strictEqual(msg.payload.tool_invocation?.success, true);
       assert.strictEqual(msg.payload.tool_invocation?.latency_ms, 123);
+    });
+    it('sends context when provided', async () => {
+      const logger = ClearcutLogger.initialize({
+        persistence: mockPersistence,
+        appVersion: '1.0.0',
+        watchdogClient: mockWatchdogClient,
+      });
+      await logger.logToolInvocation({
+        toolName: 'test_tool',
+        params: {},
+        schema: {},
+        success: true,
+        latencyMs: 123,
+        context: {
+          is_devtools_open: true,
+          is_localhost: false,
+        },
+      });
+
+      assert(mockWatchdogClient.send.calledOnce);
+      const msg = mockWatchdogClient.send.firstCall.args[0];
+      assert.strictEqual(msg.type, WatchdogMessageType.LOG_EVENT);
+      assert.deepStrictEqual(msg.payload.tool_invocation?.context, {
+        is_devtools_open: true,
+        is_localhost: false,
+      });
     });
     it('sends sanitized params', async () => {
       const logger = ClearcutLogger.initialize({
@@ -82,6 +109,7 @@ describe('ClearcutLogger', () => {
         schema,
         success: true,
         latencyMs: 123,
+        context: {},
       });
 
       assert(mockWatchdogClient.send.calledOnce);
@@ -97,12 +125,20 @@ describe('ClearcutLogger', () => {
 
   describe('setClientName', () => {
     const clients = [
+      {name: 'claude-desktop', expected: 10}, // MCP_CLIENT_CLAUDE_DESKTOP
       {name: 'claude-code', expected: 1}, // MCP_CLIENT_CLAUDE_CODE
+      {name: 'claude', expected: 1}, // MCP_CLIENT_CLAUDE_CODE
       {name: 'gemini-cli', expected: 2}, // MCP_CLIENT_GEMINI_CLI
       {name: DAEMON_CLIENT_NAME, expected: 4}, // MCP_CLIENT_DT_MCP_CLI
       {name: 'openclaw-browser', expected: 5}, // MCP_CLIENT_OPENCLAW
+      {name: 'opencode', expected: 9}, // MCP_CLIENT_OPENCODE
       {name: 'codex-mcp-client', expected: 6}, // MCP_CLIENT_CODEX
       {name: 'antigravity-client', expected: 7}, // MCP_CLIENT_ANTIGRAVITY
+      {name: 'grok-build', expected: 8}, // MCP_CLIENT_GROK
+      {name: 'xai-sdk', expected: 8}, // MCP_CLIENT_GROK
+      {name: 'github-copilot-developer', expected: 11}, // MCP_CLIENT_GITHUB_COPILOT
+      {name: 'copilot-intellij', expected: 11}, // MCP_CLIENT_GITHUB_COPILOT
+      {name: 'unknown-client', expected: 3}, // MCP_CLIENT_OTHER
     ];
 
     for (const {name, expected} of clients) {

@@ -26,11 +26,23 @@ export interface ServerError {
 
 export type ServerShutdown = Record<string, never>;
 
+export interface LoggedDevToolsData {
+  is_dom_element_selected?: boolean;
+  is_network_request_selected?: boolean;
+}
+
+export interface ToolInvocationContext {
+  is_devtools_open?: boolean;
+  is_localhost?: boolean;
+  devtools_data?: LoggedDevToolsData;
+}
+
 export interface ToolInvocation {
   tool_name: string;
   success: boolean;
   latency_ms: number;
   tool_params?: object;
+  context?: ToolInvocationContext;
 }
 
 export interface ServerStart {
@@ -80,6 +92,10 @@ export enum McpClient {
   MCP_CLIENT_OPENCLAW = 5,
   MCP_CLIENT_CODEX = 6,
   MCP_CLIENT_ANTIGRAVITY = 7,
+  MCP_CLIENT_GROK = 8,
+  MCP_CLIENT_OPENCODE = 9,
+  MCP_CLIENT_CLAUDE_DESKTOP = 10,
+  MCP_CLIENT_GITHUB_COPILOT = 11,
   MCP_CLIENT_OTHER = 3,
 }
 

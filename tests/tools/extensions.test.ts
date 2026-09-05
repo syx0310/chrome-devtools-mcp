@@ -10,7 +10,7 @@ import {afterEach, describe, it} from 'node:test';
 
 import sinon from 'sinon';
 
-import type {ParsedArguments} from '../../src/bin/chrome-devtools-mcp-cli-options.js';
+import type {ParsedArguments} from '../../src/config/mcp-options.js';
 import {listConsoleMessages} from '../../src/tools/console.js';
 import {
   installExtension,
@@ -58,15 +58,10 @@ describe('extension', () => {
       );
 
       const extensionId = extractExtensionId(response);
-      const page = context.getSelectedPptrPage();
-      await page.goto('chrome://extensions');
-
-      const element = await page.waitForSelector(
-        `extensions-manager >>> extensions-item[id="${extensionId}"]`,
-      );
+      let extensions = await context.listExtensions();
       assert.ok(
-        element,
-        `Extension with ID "${extensionId}" should be visible on chrome://extensions`,
+        extensions.has(extensionId!),
+        `Extension with ID "${extensionId}" should be installed`,
       );
 
       // Uninstall the extension
@@ -82,15 +77,10 @@ describe('extension', () => {
         'Response should indicate uninstallation',
       );
 
-      await page.waitForSelector('extensions-manager');
-
-      const elementAfterUninstall = await page.$(
-        `extensions-manager >>> extensions-item[id="${extensionId}"]`,
-      );
-      assert.strictEqual(
-        elementAfterUninstall,
-        null,
-        `Extension with ID "${extensionId}" should NOT be visible on chrome://extensions`,
+      extensions = await context.listExtensions();
+      assert.ok(
+        !extensions.has(extensionId!),
+        `Extension with ID "${extensionId}" should NOT be installed`,
       );
     });
   });
@@ -143,7 +133,7 @@ describe('extension', () => {
       {},
       {
         categoryExtensions: true,
-      } as ParsedArguments,
+      },
     );
   });
   it('triggers an extension action', async () => {
@@ -176,7 +166,7 @@ describe('extension', () => {
       {},
       {
         categoryExtensions: true,
-      } as ParsedArguments,
+      },
     );
   });
 
@@ -206,7 +196,7 @@ describe('extension', () => {
           context,
         );
 
-        const result = await response.handle('list_console_messages', context);
+        const result = await response.handle(context);
         const consoleOutput = getTextContent(result.content[0]);
         assert.ok(
           consoleOutput.includes('from content script!'),
@@ -218,7 +208,7 @@ describe('extension', () => {
       {},
       {
         categoryExtensions: true,
-      } as ParsedArguments,
+      },
     );
   });
 });

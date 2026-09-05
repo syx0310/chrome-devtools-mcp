@@ -9,7 +9,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {logger} from './logger.js';
 import {
   applyAntiDevtoolsDetectionToBrowser,
   applyStealthToBrowser,
@@ -21,6 +20,7 @@ import type {
   Target,
 } from './third_party/index.js';
 import {puppeteer} from './third_party/index.js';
+import {logger, puppeteerLogger} from './utils/logger.js';
 
 let browser: Browser | undefined;
 let browserMode: 'launched' | 'connected' | undefined;
@@ -57,6 +57,8 @@ export async function ensureBrowserConnected(options: {
   channel?: Channel;
   userDataDir?: string;
   enableExtensions?: boolean;
+  stealth?: boolean;
+  fingerprintFile?: string;
   blocklist?: string[];
   allowlist?: string[];
 }) {
@@ -71,6 +73,7 @@ export async function ensureBrowserConnected(options: {
     handleDevToolsAsPage: true,
     blocklist: options.blocklist,
     allowlist: options.allowlist,
+    logger: puppeteerLogger,
   };
 
   let autoConnect = false;
@@ -145,6 +148,17 @@ export async function ensureBrowserConnected(options: {
     );
   }
   logger?.('Connected Puppeteer');
+  try {
+    if (options.stealth) {
+      await applyStealthToBrowser(browser, {
+        fingerprintFile: options.fingerprintFile,
+        applyToExistingPages: false,
+      });
+    }
+  } catch (error) {
+    await closeBrowser();
+    throw error;
+  }
   return browser;
 }
 
@@ -165,6 +179,7 @@ interface McpLaunchOptions {
   devtools: boolean;
   enableExtensions?: boolean;
   stealth?: boolean;
+  fingerprintFile?: string;
   antiDevtoolsDetection?: boolean;
   viaCli?: boolean;
   blocklist?: string[];
@@ -269,6 +284,7 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
       enableExtensions: options.enableExtensions,
       blocklist: options.blocklist,
       allowlist: options.allowlist,
+      logger: puppeteerLogger,
     });
     if (options.logFile) {
       // FIXME: we are probably subscribing too late to catch startup logs. We
@@ -283,11 +299,19 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
         contentHeight: options.viewport.height,
       });
     }
-    if (options.stealth) {
-      await applyStealthToBrowser(browser);
-    }
-    if (options.antiDevtoolsDetection) {
-      await applyAntiDevtoolsDetectionToBrowser(browser);
+    try {
+      if (options.stealth) {
+        await applyStealthToBrowser(browser, {
+          fingerprintFile: options.fingerprintFile,
+          viewport: options.viewport,
+        });
+      }
+      if (options.antiDevtoolsDetection) {
+        await applyAntiDevtoolsDetectionToBrowser(browser);
+      }
+    } catch (error) {
+      await browser.close();
+      throw error;
     }
     return browser;
   } catch (error) {

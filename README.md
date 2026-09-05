@@ -42,7 +42,8 @@ this, run with the `--no-performance-crux` flag.
 
 Google collects usage statistics (such as tool invocation success rates, latency, and environment information) to improve the reliability and performance of Chrome DevTools MCP.
 
-Data collection is **enabled by default**. You can opt-out by passing the `--no-usage-statistics` flag when starting the server:
+This fork **disables data collection by default**. The explicit opt-out flag is
+`--no-usage-statistics`:
 
 ```json
 "args": ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics"]
@@ -121,9 +122,9 @@ To use the Chrome DevTools MCP server follow the instructions from <a href="http
     "chrome-devtools": {
       "command": "npx",
       "args": [
+        "-y",
         "chrome-devtools-mcp@latest",
-        "--browser-url=http://127.0.0.1:9222",
-        "-y"
+        "--browser-url=http://127.0.0.1:9222"
       ]
     }
   }
@@ -133,6 +134,26 @@ To use the Chrome DevTools MCP server follow the instructions from <a href="http
 This will make the Chrome DevTools MCP server automatically connect to the browser that Antigravity is using. If you are not using port 9222, make sure to adjust accordingly.
 
 Chrome DevTools MCP will not start the browser instance automatically using this approach because the Chrome DevTools MCP server connects to Antigravity's built-in browser. If the browser is not already running, you have to start it first by clicking the Chrome icon at the top right corner.
+
+</details>
+
+<details>
+  <summary>Bob</summary>
+
+Follow the <a href="https://bob.ibm.com/docs/ide/configuration/mcp/mcp-in-bob">IBM Bob MCP guide</a> and add the Chrome DevTools MCP server to your Bob MCP configuration. Use the global config (`~/.bob/mcp.json`) to apply it across all workspaces, or a project config (`.bob/mcp.json`) to scope it to one project:
+
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    }
+  }
+}
+```
+
+You can edit these files from **Bob panel → Settings → MCP → Edit Global MCP** (or **Edit Project MCP**). Bob hot-reloads on save. Once the server appears in the MCP tab, switch to the **🌎 Browser Dev** mode to get guided browser debugging directly in Bob.
 
 </details>
 
@@ -295,6 +316,19 @@ Go to `Cursor Settings` -> `MCP` -> `New MCP Server`. Use the config provided ab
 </details>
 
 <details>
+  <summary>Devin CLI</summary>
+
+**Install via CLI (MCP only)**
+
+Use the Devin CLI to add the Chrome DevTools MCP server (<a href="https://docs.devin.ai/cli/extensibility/mcp/configuration">guide</a>):
+
+```bash
+devin mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
+```
+
+</details>
+
+<details>
   <summary>Factory CLI</summary>
 Use the Factory CLI to add the Chrome DevTools MCP server (<a href="https://docs.factory.ai/cli/configuration/mcp">guide</a>):
 
@@ -331,6 +365,16 @@ Alternatively, follow the <a href="https://github.com/google-gemini/gemini-cli/b
   <summary>Gemini Code Assist</summary>
   Follow the <a href="https://cloud.google.com/gemini/docs/codeassist/use-agentic-chat-pair-programmer#configure-mcp-servers">configure MCP guide</a>
   using the standard config from above.
+</details>
+
+<details>
+  <summary>Grok Build CLI</summary>
+
+```bash
+grok mcp add chrome-devtools npx chrome-devtools-mcp@latest
+```
+
+See the <a href="https://docs.x.ai/build/features/skills-plugins-marketplaces">docs</a> for more options
 </details>
 
 <details>
@@ -514,13 +558,20 @@ If you run into any issues, checkout our [troubleshooting guide](./docs/troubles
   - [`take_snapshot`](docs/tool-reference.md#take_snapshot)
   - [`screencast_start`](docs/tool-reference.md#screencast_start)
   - [`screencast_stop`](docs/tool-reference.md#screencast_stop)
-- **Memory** (6 tools)
+- **Memory** (13 tools)
   - [`take_heapsnapshot`](docs/tool-reference.md#take_heapsnapshot)
   - [`close_heapsnapshot`](docs/tool-reference.md#close_heapsnapshot)
+  - [`compare_heapsnapshots`](docs/tool-reference.md#compare_heapsnapshots)
   - [`get_heapsnapshot_class_nodes`](docs/tool-reference.md#get_heapsnapshot_class_nodes)
   - [`get_heapsnapshot_details`](docs/tool-reference.md#get_heapsnapshot_details)
+  - [`get_heapsnapshot_dominators`](docs/tool-reference.md#get_heapsnapshot_dominators)
+  - [`get_heapsnapshot_duplicate_strings`](docs/tool-reference.md#get_heapsnapshot_duplicate_strings)
+  - [`get_heapsnapshot_edges`](docs/tool-reference.md#get_heapsnapshot_edges)
+  - [`get_heapsnapshot_object_details`](docs/tool-reference.md#get_heapsnapshot_object_details)
   - [`get_heapsnapshot_retainers`](docs/tool-reference.md#get_heapsnapshot_retainers)
+  - [`get_heapsnapshot_retaining_paths`](docs/tool-reference.md#get_heapsnapshot_retaining_paths)
   - [`get_heapsnapshot_summary`](docs/tool-reference.md#get_heapsnapshot_summary)
+  - [`query_heapsnapshot_objects`](docs/tool-reference.md#query_heapsnapshot_objects)
 - **Extensions** (5 tools)
   - [`install_extension`](docs/tool-reference.md#install_extension)
   - [`list_extensions`](docs/tool-reference.md#list_extensions)
@@ -533,10 +584,20 @@ If you run into any issues, checkout our [troubleshooting guide](./docs/troubles
 - **WebMCP** (2 tools)
   - [`execute_webmcp_tool`](docs/tool-reference.md#execute_webmcp_tool)
   - [`list_webmcp_tools`](docs/tool-reference.md#list_webmcp_tools)
+- **Progressive Web Apps** (4 tools)
+  - [`get_os_app_state`](docs/tool-reference.md#get_os_app_state)
+  - [`install_pwa`](docs/tool-reference.md#install_pwa)
+  - [`launch_pwa`](docs/tool-reference.md#launch_pwa)
+  - [`uninstall_pwa`](docs/tool-reference.md#uninstall_pwa)
 
 <!-- END AUTO GENERATED TOOLS -->
 
 ## Configuration
+
+Stealth mode uses persistent Apify fingerprints. Run
+`chrome-devtools-mcp --reset-fingerprint` in a separate terminal to refresh the
+profile for new sessions without restarting your MCP client. See
+[fingerprint configuration and reset behavior](./docs/fingerprints.md).
 
 The Chrome DevTools MCP server supports the following configuration option:
 
@@ -550,14 +611,17 @@ The Chrome DevTools MCP server supports the following configuration option:
 - **`--browserUrl`/ `--browser-url`, `-u`**
   Connect to a running, debuggable Chrome instance (e.g. `http://127.0.0.1:9222`). For more details see: https://github.com/ChromeDevTools/chrome-devtools-mcp#connecting-to-a-running-chrome-instance.
   - **Type:** string
+  - **Default:** `false`
 
 - **`--wsEndpoint`/ `--ws-endpoint`, `-w`**
   WebSocket endpoint to connect to a running Chrome instance (e.g., ws://127.0.0.1:9222/devtools/browser/<id>). Alternative to --browserUrl.
   - **Type:** string
+  - **Default:** `false`
 
 - **`--wsHeaders`/ `--ws-headers`**
   Custom headers for WebSocket connection in JSON format (e.g., '{"Authorization":"Bearer token"}'). Only works with --wsEndpoint.
   - **Type:** string
+  - **Default:** `false`
 
 - **`--headless`**
   Whether to run in headless (no UI) mode.
@@ -567,97 +631,128 @@ The Chrome DevTools MCP server supports the following configuration option:
 - **`--executablePath`/ `--executable-path`, `-e`**
   Path to custom Chrome executable.
   - **Type:** string
+  - **Default:** `false`
 
 - **`--isolated`**
   If specified, creates a temporary user-data-dir that is automatically cleaned up after the browser is closed. Defaults to false.
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--userDataDir`/ `--user-data-dir`**
   Path to the user data directory for Chrome. Default is $HOME/.cache/chrome-devtools-mcp/chrome-profile$CHANNEL_SUFFIX_IF_NON_STABLE
   - **Type:** string
+  - **Default:** `false`
 
 - **`--channel`**
   Specify a different Chrome channel that should be used. The default is the stable channel version.
   - **Type:** string
   - **Choices:** `canary`, `dev`, `beta`, `stable`
+  - **Default:** `false`
 
 - **`--logFile`/ `--log-file`**
   Path to a file to write debug logs to. Set the env variable `DEBUG` to `*` to enable verbose logs. Useful for submitting bug reports.
   - **Type:** string
+  - **Default:** `false`
 
 - **`--viewport`**
   Initial viewport size for the Chrome instances started by the server. For example, `1280x720`. In headless mode, max size is 3840x2160px.
   - **Type:** string
+  - **Default:** `false`
 
 - **`--proxyServer`/ `--proxy-server`**
   Proxy server configuration for Chrome passed as --proxy-server when launching the browser. See https://www.chromium.org/developers/design-documents/network-settings/ for details.
   - **Type:** string
+  - **Default:** `false`
 
 - **`--acceptInsecureCerts`/ `--accept-insecure-certs`**
   If enabled, ignores errors relative to self-signed and expired certificates. Use with caution.
   - **Type:** boolean
+  - **Default:** `false`
 
-- **`--experimentalPageIdRouting`/ `--experimental-page-id-routing`**
-  Whether to expose pageId on page-scoped tools and route requests by page ID (useful for concurrent agent sessions).
+- **`--pageIdRouting`/ `--page-id-routing`**
+  Require pageId on page-scoped tools and route requests by page ID (useful for concurrent agent sessions). Use --no-page-id-routing to disable.
   - **Type:** boolean
+  - **Default:** `true`
 
 - **`--experimentalDevtools`/ `--experimental-devtools`**
   Whether to enable automation over DevTools targets
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--experimentalVision`/ `--experimental-vision`**
   Whether to enable coordinate-based tools such as click_at(x,y). Usually requires a computer-use model able to produce accurate coordinates by looking at screenshots.
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--memoryDebugging`/ `--memory-debugging`, `-experimentalMemory`**
   Whether to enable memory debugging tools.
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--experimentalStructuredContent`/ `--experimental-structured-content`**
   Whether to output structured formatted content.
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--experimentalIncludeAllPages`/ `--experimental-include-all-pages`**
   Whether to include all kinds of pages such as webviews or background pages as pages.
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--experimentalScreencast`/ `--experimental-screencast`**
   Exposes experimental screencast tools (requires ffmpeg). Install ffmpeg https://www.ffmpeg.org/download.html and ensure it is available in the MCP server PATH.
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--stealth`**
-  Stealth mode reduces automation detection signals (hides WebDriver, removes automation flags). Enabled by default. Use --no-stealth to disable.
+  Uses a persistent Apify fingerprint matched to the actual Chrome platform and version, and reduces automation signals. Enabled by default. Use --no-stealth to disable.
   - **Type:** boolean
   - **Default:** `true`
 
-- **`--antiDevtoolsDetection`/ `--anti-devtools-detection`**
-  Blocks DevTools detection scripts (timer interception, window dimension fixes, console getter prevention). Enabled by default. Use --no-anti-devtools-detection to disable.
+- **`--fingerprintFile`/ `--fingerprint-file`**
+  Path to persistent fingerprint state. Use the same path with --reset-fingerprint to rotate fingerprints for new sessions.
+  - **Type:** string
+  - **Default:** `false`
+
+- **`--resetFingerprint`/ `--reset-fingerprint`**
+  Reset the saved fingerprint revision and exit without starting Chrome or the MCP server. Running servers pick it up for new pages; existing sessions keep their fingerprint.
   - **Type:** boolean
-  - **Default:** `true`
+  - **Default:** `false`
+
+- **`--antiDevtoolsDetection`/ `--anti-devtools-detection`**
+  Requests debugger pause suppression for MCP sessions. Does not modify page timers, console output, permissions, or window dimensions.
+  - **Type:** boolean
+  - **Default:** `false`
 
 - **`--experimentalFfmpegPath`/ `--experimental-ffmpeg-path`**
   Path to ffmpeg executable for screencast recording.
   - **Type:** string
+  - **Default:** `false`
 
 - **`--categoryExperimentalWebmcp`/ `--category-experimental-webmcp`**
-  Set to true to enable debugging WebMCP tools. Requires Chrome 149+ with the following flags: `--enable-features=WebMCPTesting,DevToolsWebMCPSupport`
+  Set to true to enable debugging WebMCP tools. Requires Chrome 150+ with the following flag: `--enable-features=WebMCP`
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--chromeArg`/ `--chrome-arg`**
   Additional arguments for Chrome. Only applies when Chrome is launched by chrome-devtools-mcp.
   - **Type:** array
+  - **Default:** `false`
 
 - **`--blockedUrlPattern`/ `--blocked-url-pattern`**
-  Restricts network access by blocking specified URL patterns (uses https://urlpattern.spec.whatwg.org/). Silently detaches from targets with blocked URLs upon connection, and blocks runtime requests (including navigations and subresources). Accepts an array of patterns.
+  Restricts browser's network access by blocking specified URL patterns (uses https://urlpattern.spec.whatwg.org/). Silently detaches from targets with blocked URLs upon connection, and blocks runtime requests (including navigations and subresources). Accepts an array of patterns.
   - **Type:** array
+  - **Default:** `false`
 
 - **`--allowedUrlPattern`/ `--allowed-url-pattern`**
-  Restricts network access by allowing only specified URL patterns (uses https://urlpattern.spec.whatwg.org/). Requires Chrome 149+. Silently detaches from targets with unallowed URLs upon connection, and blocks runtime requests (including navigations and subresources). Accepts an array of patterns.
+  Restricts browser's network access by allowing only specified URL patterns (uses https://urlpattern.spec.whatwg.org/). Requires Chrome 149+. Silently detaches from targets with unallowed URLs upon connection, and blocks runtime requests (including navigations and subresources). Accepts an array of patterns.
   - **Type:** array
+  - **Default:** `false`
 
 - **`--ignoreDefaultChromeArg`/ `--ignore-default-chrome-arg`**
   Explicitly disable default arguments for Chrome. Only applies when Chrome is launched by chrome-devtools-mcp.
   - **Type:** array
+  - **Default:** `false`
 
 - **`--categoryEmulation`/ `--category-emulation`**
   Set to false to exclude tools related to emulation.
@@ -684,22 +779,54 @@ The Chrome DevTools MCP server supports the following configuration option:
   - **Type:** boolean
   - **Default:** `false`
 
+- **`--categoryPwa`/ `--category-pwa`**
+  Set to true to include tools for automating Progressive Web Apps (install, launch, uninstall, and OS state). This feature is only supported with a pipe connection; autoConnect, browserUrl, and wsEndpoint are not supported.
+  - **Type:** boolean
+  - **Default:** `false`
+
 - **`--performanceCrux`/ `--performance-crux`**
   Set to false to disable sending URLs from performance traces to CrUX API to get field performance data.
   - **Type:** boolean
   - **Default:** `true`
 
 - **`--usageStatistics`/ `--usage-statistics`**
-  Set to false to opt-out of usage statistics collection. Google collects usage data to improve the tool, handled under the Google Privacy Policy (https://policies.google.com/privacy). This is independent from Chrome browser metrics. Disabled if `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` or `CI` env variables are set.
+  Set to true to opt in to usage statistics collection. Google collects usage data to improve the tool, handled under the Google Privacy Policy (https://policies.google.com/privacy). This is independent from Chrome browser metrics. Disabled if `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` or `CI` env variables are set.
   - **Type:** boolean
-  - **Default:** `true`
+  - **Default:** `false`
+
+- **`--screenshotFormat`/ `--screenshot-format`**
+  Override the default output format used by take_screenshot when the caller does not specify one. JPEG and WebP are ~3-5x smaller than PNG, which helps reduce context size in AI conversations. Unset preserves the existing default ("png").
+  - **Type:** string
+  - **Choices:** `jpeg`, `png`, `webp`
+  - **Default:** `false`
+
+- **`--screenshotQuality`/ `--screenshot-quality`**
+  Override the default compression quality (0-100) used by take_screenshot for JPEG and WebP when the caller does not specify one. Lower values mean smaller files. Ignored for PNG. Unset preserves the Puppeteer default.
+  - **Type:** number
+  - **Default:** `false`
+
+- **`--screenshotMaxWidth`/ `--screenshot-max-width`**
+  Maximum width in pixels for screenshots. If the captured image is wider, it is downscaled (preserving aspect ratio) before being returned. Reduces context size in AI conversations. Unset means no resize.
+  - **Type:** number
+  - **Default:** `false`
+
+- **`--screenshotMaxHeight`/ `--screenshot-max-height`**
+  Maximum height in pixels for screenshots. If the captured image is taller, it is downscaled (preserving aspect ratio) before being returned. Can be combined with --screenshot-max-width; the smaller scale factor wins. Unset means no resize.
+  - **Type:** number
+  - **Default:** `false`
 
 - **`--slim`**
   Exposes a "slim" set of 3 tools covering navigation, script execution and screenshots only. Useful for basic browser tasks.
   - **Type:** boolean
+  - **Default:** `false`
 
 - **`--redactNetworkHeaders`/ `--redact-network-headers`**
   If true, redacts some of the network headers considered sensitive before returning to the client.
+  - **Type:** boolean
+  - **Default:** `false`
+
+- **`--allowUnrestrictedPaths`/ `--allow-unrestricted-paths`**
+  If set, disables the default path restriction that applies when the MCP client does not negotiate the roots capability. By default, file-writing tools are restricted to the OS temp directory when no roots are configured. Use this only when connecting a trusted local client that does not implement MCP roots and requires access to paths outside the temp directory.
   - **Type:** boolean
   - **Default:** `false`
 
@@ -750,22 +877,25 @@ You can also run `npx chrome-devtools-mcp@latest --help` to see all available co
 
 ### Concurrent sessions
 
-Most MCP clients start one Chrome DevTools MCP server per conversation. If your
-client shares a single server instance across concurrent agents or subagents,
-start the server with `--experimentalPageIdRouting`. This exposes `pageId` on
-page-scoped tools so each agent can route tool calls to the tab it is working
-with.
+Most MCP clients start one Chrome DevTools MCP server per conversation.
+By default, the server runs with `--pageIdRouting` enabled, making `pageId` a
+required parameter on page-scoped tools (such as `click`, `fill`, `navigate_page`,
+`take_snapshot`, etc.) so multiple agents or subagents sharing a server instance can
+route tool calls directly to the specific tab they are working with.
+
+For `evaluate_script`, `pageId` is required by default for targeting pages, but
+becomes optional when `--categoryExtensions` is enabled so that `serviceWorkerId`
+can be specified instead to evaluate inside an extension background service worker.
+
+To disable this behavior and default to the currently selected page, pass
+`--no-page-id-routing`.
 
 ```json
 {
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": [
-        "-y",
-        "chrome-devtools-mcp@latest",
-        "--experimentalPageIdRouting"
-      ]
+      "args": ["-y", "chrome-devtools-mcp@latest"]
     }
   }
 }
@@ -778,16 +908,19 @@ server instances.
 
 ### User data directory
 
-`chrome-devtools-mcp` starts a Chrome's stable channel instance using the following user
+By default, `chrome-devtools-mcp` starts a Chrome's stable channel instance using the following user
 data directory:
 
-- Linux / macOS: `$HOME/.cache/chrome-devtools-mcp/chrome-profile-$CHANNEL`
-- Windows: `%HOMEPATH%/.cache/chrome-devtools-mcp/chrome-profile-$CHANNEL`
+- Linux / macOS: `$HOME/.cache/chrome-devtools-mcp/chrome-profile`
+- Windows: `%USERPROFILE%\.cache\chrome-devtools-mcp\chrome-profile`
 
-The user data directory is not cleared between runs and shared across
-all instances of `chrome-devtools-mcp`. Set the `isolated` option to `true`
-to use a temporary user data dir instead which will be cleared automatically after
-the browser is closed.
+For non-stable channels, the channel name is appended to the directory name, for example
+`chrome-profile-canary`.
+
+The user data directory is not cleared between runs and is reused for subsequent
+runs with the same channel. Only one browser can use it at a time. Set the `isolated`
+option to `true` to use a temporary user data directory instead which will be cleared
+automatically after the browser is closed.
 
 ### Connecting to a running Chrome instance
 
@@ -919,3 +1052,9 @@ Please consult [these instructions](./docs/debugging-android.md).
 ## Known limitations
 
 See [Troubleshooting](./docs/troubleshooting.md).
+
+## Integrating as a browser subagent
+
+If you are developing agentic tooling and want to provide an integrated browser subagent as part of your product, we recommend building on top of Chrome DevTools for agents.
+
+For a reference implementation, see the [Gemini CLI browser agent documentation](https://geminicli.com/docs/core/subagents/#browser-agent).

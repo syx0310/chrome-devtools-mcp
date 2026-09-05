@@ -5,11 +5,11 @@
  */
 
 import assert from 'node:assert';
-import {spawn} from 'node:child_process';
+import {spawn, type ChildProcess} from 'node:child_process';
 import path from 'node:path';
 
 import type {CallToolResult} from '@modelcontextprotocol/sdk/types.js';
-import logger from 'debug';
+
 import type {Browser} from 'puppeteer';
 import puppeteer, {Locator} from 'puppeteer';
 import type {
@@ -22,7 +22,7 @@ import type {
 } from 'puppeteer-core';
 import sinon from 'sinon';
 
-import type {ParsedArguments} from '../src/bin/chrome-devtools-mcp-cli-options.js';
+import type {ParsedArguments} from '../src/config/mcp-options.js';
 import {McpContext} from '../src/McpContext.js';
 import {McpResponse} from '../src/McpResponse.js';
 import {TextSnapshot} from '../src/TextSnapshot.js';
@@ -78,41 +78,79 @@ export async function withBrowser(
     allowedUrlPattern?: string[];
   } = {},
 ) {
-  const launchOptions: LaunchOptions = {
-    executablePath:
-      options.executablePath ?? process.env.PUPPETEER_EXECUTABLE_PATH,
-    headless: !options.debug,
-    defaultViewport: null,
-    devtools: options.autoOpenDevTools ?? false,
-    pipe: true,
-    handleDevToolsAsPage: true,
-    args: [
-      ...(options.args || []),
-      '--screen-info={3840x2160}',
-      '--disable-frame-rate-limit',
-    ],
-    enableExtensions: true,
-    blocklist: options.blockedUrlPattern,
-    allowlist: options.allowedUrlPattern,
-  };
-  const key = JSON.stringify(launchOptions);
+  let attempt = 1;
+  while (attempt <= 3) {
+    const launchOptions: LaunchOptions = {
+      executablePath:
+        options.executablePath ?? process.env.PUPPETEER_EXECUTABLE_PATH,
+      headless: !options.debug,
+      defaultViewport: null,
+      devtools: options.autoOpenDevTools ?? false,
+      pipe: true,
+      handleDevToolsAsPage: true,
+      args: [...(options.args || []), '--screen-info={3840x2160}'],
+      enableExtensions: true,
+      blocklist: options.blockedUrlPattern,
+      allowlist: options.allowedUrlPattern,
+    };
+    const key = JSON.stringify(launchOptions);
 
-  let browser = browsers.get(key);
-  if (!browser) {
-    browser = await puppeteer.launch(launchOptions);
-    browsers.set(key, browser);
-  }
-  const newPage = await browser.newPage();
-  // Close other pages.
-  await Promise.all(
-    (await browser.pages()).map(async page => {
-      if (page !== newPage) {
-        await page.close();
+    let browser = browsers.get(key);
+    if (!browser) {
+      browser = await puppeteer.launch(launchOptions);
+      browsers.set(key, browser);
+    }
+
+    try {
+      await Promise.race([
+        (async () => {
+          const newPage = await browser.newPage();
+          // Close other pages.
+          await Promise.all(
+            (await browser.pages()).map(async page => {
+              if (page !== newPage) {
+                await page.close();
+              }
+            }),
+          );
+
+          await cb(browser, newPage);
+        })(),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('withBrowser timeout exceeded')),
+            60000,
+          ),
+        ),
+      ]);
+      return;
+    } catch (error) {
+      browsers.delete(key);
+      try {
+        await Promise.race([
+          browser.close(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('browser.close timeout')), 2000),
+          ),
+        ]);
+      } catch {
+        browser.process()?.kill('SIGKILL');
       }
-    }),
-  );
 
-  await cb(browser, newPage);
+      const isRetryable =
+        error instanceof Error &&
+        (error.message === 'withBrowser timeout exceeded' ||
+          error.message.includes('closed') ||
+          error.message.includes('crash') ||
+          error.message.includes('hang'));
+
+      if (attempt === 3 || !isRetryable) {
+        throw error;
+      }
+      attempt++;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
 }
 
 export async function withMcpContext(
@@ -125,25 +163,30 @@ export async function withMcpContext(
     args?: string[];
     blockedUrlPattern?: string[];
     allowedUrlPattern?: string[];
+    allowUnrestrictedPaths?: boolean;
+    navigationTimeout?: number;
   } = {},
-  args: ParsedArguments = {} as ParsedArguments,
+  args: Partial<ParsedArguments> = {},
 ) {
   await withBrowser(async browser => {
     TextSnapshot.resetCounter();
-    const response = new McpResponse(args);
+    McpContext.resetPageIdsForTesting();
+    const response = new McpResponse(args as ParsedArguments);
     if (context) {
       context.dispose();
     }
     context = await McpContext.from(
       browser,
-      logger('test'),
+      undefined,
       {
         experimentalDevToolsDebugging: false,
         performanceCrux: options.performanceCrux ?? true,
-        hasNetworkBlockOrAllowlist: Boolean(
-          (options.blockedUrlPattern && options.blockedUrlPattern.length > 0) ||
-          (options.allowedUrlPattern && options.allowedUrlPattern.length > 0),
-        ),
+        allowList: options.allowedUrlPattern,
+        blocklist: options.blockedUrlPattern,
+        allowUnrestrictedPaths: options.allowUnrestrictedPaths ?? false,
+        navigationTimeout:
+          options.navigationTimeout ??
+          (process.platform === 'win32' ? 20000 : undefined),
       },
       Locator,
     );
@@ -204,7 +247,10 @@ export function getMockRequest(
       );
     },
     redirectChain(): HTTPRequest[] {
-      return options.redirectChain ?? [];
+      // Puppeteer returns a fresh copy on every call (HTTPRequest returns
+      // `this._redirectChain.slice()`); mirror that so formatters can't share
+      // and accidentally mutate the same array across calls.
+      return [...(options.redirectChain ?? [])];
     },
     isNavigationRequest() {
       return options.navigationRequest ?? false;
@@ -253,25 +299,29 @@ export function html(
 </html>`;
 }
 
-export function stabilizeStructuredContent(content: unknown): unknown {
-  if (typeof content === 'string') {
-    return stabilizeResponseOutput(content);
-  }
-  if (Array.isArray(content)) {
-    return content.map(item => stabilizeStructuredContent(item));
-  }
-  if (typeof content === 'object' && content !== null) {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(content)) {
-      if (key === 'snapshotFilePath' && typeof value === 'string') {
-        result[key] = '<file>';
-      } else {
-        result[key] = stabilizeStructuredContent(value);
-      }
+export function stabilizeStructuredContent(content: unknown): string {
+  const stabilize = (c: unknown): unknown => {
+    if (typeof c === 'string') {
+      return stabilizeResponseOutput(c);
     }
-    return result;
-  }
-  return content;
+    if (Array.isArray(c)) {
+      return c.map(item => stabilize(item));
+    }
+    if (typeof c === 'object' && c !== null) {
+      const result: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(c)) {
+        if (key === 'snapshotFilePath' && typeof value === 'string') {
+          result[key] = '<file>';
+        } else {
+          result[key] = stabilize(value);
+        }
+      }
+      return result;
+    }
+    return c;
+  };
+
+  return JSON.stringify(stabilize(content), null, 2);
 }
 
 export function stabilizeResponseOutput(text: unknown) {
@@ -284,6 +334,9 @@ export function stabilizeResponseOutput(text: unknown) {
 
   const localhostRegEx = /localhost:\d{5}/g;
   output = output.replaceAll(localhostRegEx, 'localhost:<port>');
+
+  const loopbackAddress = /127.0.0.1:\d{5}/g;
+  output = output.replaceAll(loopbackAddress, '127.0.0.1:<port>');
 
   const userAgentRegEx = /user-agent:.*\n/g;
   output = output.replaceAll(userAgentRegEx, 'user-agent:<user-agent>\n');
@@ -358,9 +411,18 @@ export function getMockPage(): Page {
   } satisfies Page;
 }
 
-export function getMockBrowser(): Browser {
+export function getMockBrowser(options?: {
+  process?: ChildProcess | null;
+  wsEndpoint?: string;
+}): Browser {
   const pages = [getMockPage()];
   return {
+    process() {
+      return options?.process ?? null;
+    },
+    wsEndpoint() {
+      return options?.wsEndpoint ?? '';
+    },
     pages() {
       return Promise.resolve(pages);
     },

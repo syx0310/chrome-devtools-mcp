@@ -4,26 +4,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import '../polyfill.js';
+import '../utils/polyfill.js';
 
 import process from 'node:process';
 
 import {closeBrowser} from '../browser.js';
+import {resetFingerprint, resolveFingerprintFile} from '../fingerprint.js';
 import {createMcpServer, logDisclaimers} from '../index.js';
-import {logger, saveLogsToFile} from '../logger.js';
 import {ClearcutLogger} from '../telemetry/ClearcutLogger.js';
 import {computeFlagUsage} from '../telemetry/flagUtils.js';
 import {StdioServerTransport} from '../third_party/index.js';
 import {checkForUpdates} from '../utils/check-for-updates.js';
+import {logger, saveLogsToFile} from '../utils/logger.js';
 import {VERSION} from '../version.js';
 
-import {cliOptions, parseArguments} from './chrome-devtools-mcp-cli-options.js';
+import {mcpOptions, parseArguments} from '../config/mcp-options.js';
+
+export const args = parseArguments(VERSION);
+
+if (args.resetFingerprint) {
+  const reset = await resetFingerprint(
+    resolveFingerprintFile(args.fingerprintFile),
+  );
+  console.log(
+    `Fingerprint reset: ${reset.revision}\nState: ${reset.filePath}\nNew pages use the new fingerprint. Existing pages and named sessions are unchanged.`,
+  );
+  process.exit(0);
+}
 
 await checkForUpdates(
   'Run `npm install chrome-devtools-mcp@latest` to update.',
 );
-
-export const args = parseArguments(VERSION);
 
 const logFile = args.logFile ? saveLogsToFile(args.logFile) : undefined;
 
@@ -51,7 +62,7 @@ async function shutdown(reason: string): Promise<void> {
   setTimeout(() => {
     logger?.('Shutdown timeout exceeded, forcing exit');
     process.exit(0);
-  }, 10000).unref();
+  }, 5000).unref();
   await closeBrowser();
   process.exit(0);
 }
@@ -80,4 +91,4 @@ await server.connect(transport);
 logger?.('Chrome DevTools MCP Server connected');
 logDisclaimers(args);
 void ClearcutLogger.get()?.logDailyActiveIfNeeded();
-void ClearcutLogger.get()?.logServerStart(computeFlagUsage(args, cliOptions));
+void ClearcutLogger.get()?.logServerStart(computeFlagUsage(args, mcpOptions));

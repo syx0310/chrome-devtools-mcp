@@ -9,11 +9,45 @@ import {describe, it} from 'node:test';
 
 import {
   bucketizeLatency,
+  buildContext,
+  getEnumValues,
   sanitizeParams,
   stripUnderscoreBeforeNumber,
   transformArgName,
 } from '../../src/telemetry/transformation.js';
 import {zod} from '../../src/third_party/index.js';
+
+describe('getEnumValues', () => {
+  it('resolves values for a bare enum', () => {
+    assert.deepStrictEqual(getEnumValues(zod.enum(['a', 'b'])), ['a', 'b']);
+  });
+
+  it('resolves values through optional/default wrappers in any order', () => {
+    assert.deepStrictEqual(getEnumValues(zod.enum(['a', 'b']).optional()), [
+      'a',
+      'b',
+    ]);
+    assert.deepStrictEqual(getEnumValues(zod.enum(['a', 'b']).default('a')), [
+      'a',
+      'b',
+    ]);
+    assert.deepStrictEqual(
+      getEnumValues(zod.enum(['a', 'b']).default('a').optional()),
+      ['a', 'b'],
+    );
+    assert.deepStrictEqual(
+      getEnumValues(zod.enum(['a', 'b']).optional().default('a')),
+      ['a', 'b'],
+    );
+  });
+
+  it('throws for a non-enum type', () => {
+    assert.throws(
+      () => getEnumValues(zod.string()),
+      /Cannot resolve enum values/,
+    );
+  });
+});
 
 describe('bucketizeLatency', () => {
   it('should bucketize values correctly', () => {
@@ -162,6 +196,60 @@ describe('transformArgName', () => {
     assert.strictEqual(
       transformArgName('ZodString', 'my3pParam'),
       'my3p_param_length',
+    );
+  });
+});
+
+describe('buildContext', () => {
+  it('should set is_devtools_open based on devToolsData', () => {
+    assert.deepStrictEqual(buildContext(undefined, undefined), {
+      is_devtools_open: false,
+    });
+    assert.deepStrictEqual(buildContext({}, undefined), {
+      is_devtools_open: false,
+    });
+    assert.deepStrictEqual(buildContext({cdpBackendNodeId: 1}, undefined), {
+      is_devtools_open: true,
+      devtools_data: {
+        is_dom_element_selected: true,
+      },
+    });
+  });
+
+  it('should set is_localhost based on pageUrl', () => {
+    assert.deepStrictEqual(
+      buildContext(undefined, 'http://localhost:9222/test'),
+      {
+        is_devtools_open: false,
+        is_localhost: true,
+      },
+    );
+    assert.deepStrictEqual(
+      buildContext(undefined, 'https://example.com/test'),
+      {
+        is_devtools_open: false,
+        is_localhost: false,
+      },
+    );
+  });
+
+  it('should include devtools_data when present', () => {
+    assert.deepStrictEqual(
+      buildContext(
+        {
+          cdpBackendNodeId: 1,
+          cdpRequestId: 'req-1',
+        },
+        'http://localhost:9222/',
+      ),
+      {
+        is_devtools_open: true,
+        is_localhost: true,
+        devtools_data: {
+          is_dom_element_selected: true,
+          is_network_request_selected: true,
+        },
+      },
     );
   });
 });

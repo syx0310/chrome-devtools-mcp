@@ -23,17 +23,28 @@ The CLI acts as a client to a background `chrome-devtools-mcp` daemon (uses Unix
 # Check if the daemon is running
 chrome-devtools status
 
-# Navigate the current page to a URL
-chrome-devtools navigate_page "https://google.com"
+# Navigate page 1 to a URL
+chrome-devtools navigate_page 1 --url "https://google.com"
 
-# Take a screenshot and save it to a file
-chrome-devtools take_screenshot --filePath screenshot.png
+# Take a screenshot of page 1 and save it to a file
+chrome-devtools take_screenshot 1 --filePath screenshot.png
 
 # Stop the background daemon when finished
 chrome-devtools stop
 ```
 
 ## Command Usage
+
+To reset the fingerprint used by new browser sessions, run the server binary's
+one-shot command in a separate terminal:
+
+```sh
+chrome-devtools-mcp --reset-fingerprint
+```
+
+If the server uses `--fingerprint-file`, pass the same absolute path to this
+command. Existing pages and named sessions keep their profile and storage. See
+[persistent fingerprints](./fingerprints.md) for details.
 
 The CLI only supports tools available in the MCP server without additional arguments (see [Tool reference](./tool-reference.md)).
 Thus, `--categoryExtensions` tools are currently not available in the CLI.
@@ -42,7 +53,7 @@ Thus, `--categoryExtensions` tools are currently not available in the CLI.
 chrome-devtools <tool> [arguments] [flags]
 ```
 
-- **Required Arguments**: Passed as positional arguments.
+- **Required Arguments**: Passed as positional arguments. Page-scoped tools require `<pageId>` as their first positional argument.
 - **Optional Arguments**: Passed as flags (e.g., `--filePath`, `--fullPage`).
 
 ### Examples
@@ -51,24 +62,38 @@ chrome-devtools <tool> [arguments] [flags]
 
 ```sh
 chrome-devtools new_page "https://example.com"
-chrome-devtools navigate_page "https://web.dev" --type url
+chrome-devtools navigate_page 1 --url "https://web.dev"
 ```
 
 **Interaction:**
 
 ```sh
-# Click an element by its UID from a snapshot
-chrome-devtools click "element-uid-123"
+# Click an element by its UID from a snapshot on page 1
+chrome-devtools click 1 "element-uid-123"
 
-# Fill a form field
-chrome-devtools fill "input-uid-456" "search query"
+# Fill a form field on page 1
+chrome-devtools fill 1 "input-uid-456" "search query"
+```
+
+**Script Evaluation:**
+
+- When `--categoryExtensions` and `--pageIdRouting` are enabled:
+  - Target a page using `--pageId <number>`: `chrome-devtools evaluate_script "() => document.title" --pageId 1`
+  - Target an extension service worker using `--serviceWorkerId <string>`: `chrome-devtools evaluate_script "() => self.registration.scope" --serviceWorkerId sw-1`
+
+```sh
+# Evaluate a JavaScript expression on page 1
+chrome-devtools evaluate_script "() => document.title" --pageId 1
+
+# Evaluate inside an extension service worker
+chrome-devtools evaluate_script "() => self.registration.scope" --serviceWorkerId sw-1
 ```
 
 **Analysis:**
 
 ```sh
-# Run a Lighthouse audit (defaults to navigation mode)
-chrome-devtools lighthouse_audit --mode snapshot
+# Run a Lighthouse audit on page 1 (defaults to navigation mode)
+chrome-devtools lighthouse_audit 1 --mode snapshot
 ```
 
 ## Output format

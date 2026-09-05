@@ -7,8 +7,8 @@
 import process from 'node:process';
 
 import {DAEMON_CLIENT_NAME} from '../daemon/utils.js';
-import {logger} from '../logger.js';
 import type {zod, ShapeOutput} from '../third_party/index.js';
+import {logger} from '../utils/logger.js';
 
 import type {ErrorCode} from './errors.js';
 import type {LocalState, Persistence} from './persistence.js';
@@ -19,6 +19,7 @@ import {
   WatchdogMessageType,
   OsType,
   type ToolInvocation,
+  type ToolInvocationContext,
 } from './types.js';
 import {WatchdogClient} from './WatchdogClient.js';
 
@@ -89,7 +90,9 @@ export class ClearcutLogger {
 
   setClientName(clientName: string): void {
     const lowerName = clientName.toLowerCase();
-    if (lowerName.includes('claude')) {
+    if (lowerName.includes('claude-desktop')) {
+      this.#mcpClient = McpClient.MCP_CLIENT_CLAUDE_DESKTOP;
+    } else if (lowerName.includes('claude')) {
       this.#mcpClient = McpClient.MCP_CLIENT_CLAUDE_CODE;
     } else if (lowerName.includes('gemini')) {
       this.#mcpClient = McpClient.MCP_CLIENT_GEMINI_CLI;
@@ -97,10 +100,16 @@ export class ClearcutLogger {
       this.#mcpClient = McpClient.MCP_CLIENT_DT_MCP_CLI;
     } else if (lowerName.includes('openclaw')) {
       this.#mcpClient = McpClient.MCP_CLIENT_OPENCLAW;
+    } else if (lowerName.includes('opencode')) {
+      this.#mcpClient = McpClient.MCP_CLIENT_OPENCODE;
     } else if (lowerName.includes('codex')) {
       this.#mcpClient = McpClient.MCP_CLIENT_CODEX;
     } else if (lowerName.includes('antigravity')) {
       this.#mcpClient = McpClient.MCP_CLIENT_ANTIGRAVITY;
+    } else if (lowerName.includes('grok') || lowerName.includes('xai')) {
+      this.#mcpClient = McpClient.MCP_CLIENT_GROK;
+    } else if (lowerName.includes('copilot')) {
+      this.#mcpClient = McpClient.MCP_CLIENT_GITHUB_COPILOT;
     } else {
       this.#mcpClient = McpClient.MCP_CLIENT_OTHER;
     }
@@ -112,6 +121,7 @@ export class ClearcutLogger {
     schema: zod.ZodRawShape;
     success: boolean;
     latencyMs: number;
+    context: ToolInvocationContext;
   }): Promise<void> {
     const sanitizedToolName = stripUnderscoreBeforeNumber(args.toolName);
     const tool_invocation: ToolInvocation = {
@@ -119,6 +129,9 @@ export class ClearcutLogger {
       success: args.success,
       latency_ms: args.latencyMs,
     };
+    if (Object.keys(args.context).length > 0) {
+      tool_invocation.context = args.context;
+    }
     if (Object.keys(args.params).length > 0) {
       tool_invocation.tool_params = {
         [`${sanitizedToolName}_params`]: sanitizeParams(
